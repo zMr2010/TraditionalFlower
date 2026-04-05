@@ -1,0 +1,148 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>传统文花大乱斗</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <main id="app">
+    <canvas id="gameCanvas" width="1280" height="720" aria-label="游戏画面"></canvas>
+
+    <div id="startHint" class="start-hint">
+      <h1>传统文花大乱斗</h1>
+      <p>1P: W/A/D 移动，S 角色技能，K 武器技能，J 冲撞，Y 投降</p>
+      <p>2P: ↑/←/→ 移动，↓ 角色技能，小键盘 2 武器技能，小键盘 1 冲撞，P 投降</p>
+      <p>F1: 战斗中查看说明并暂停，F3: 显示碰撞箱，F12: 已禁用</p>
+      <p>开始界面中，双方同时进入同一传送门并停留 2 秒即可进入对应模式</p>
+    </div>
+
+    <button id="startMenuButton" class="start-menu-button" type="button" aria-label="开始菜单">⋯</button>
+    <div id="startMenuPanel" class="start-menu-panel hidden">
+      <button id="showAuthorsButton" class="start-menu-item" type="button">查看作者</button>
+      <button id="showDonateButton" class="start-menu-item" type="button">打赏支持</button>
+    </div>
+
+    <section id="startOverlay" class="start-overlay hidden">
+      <article class="start-overlay-card">
+        <h3 id="startOverlayTitle">信息</h3>
+        <div id="startOverlayText" class="start-overlay-text"></div>
+        <img id="startOverlayImage" class="start-overlay-image hidden" alt="打赏二维码">
+        <button id="startOverlayClose" class="confirm-button" type="button">关闭</button>
+      </article>
+    </section>
+
+    <div id="phaseBanner" class="phase-banner"></div>
+
+    <section id="hud" class="hud hidden">
+      <div class="hp-card">
+        <div class="hp-head">
+          <span class="side-tag p1">P1</span>
+          <span id="p1HealthText" class="hp-text">100 / 100</span>
+        </div>
+        <div class="hp-track">
+          <div id="p1HealthFill" class="hp-fill p1"></div>
+        </div>
+        <div class="skill-cd-row">
+          <span id="p1WeaponCdText" class="skill-cd-text">武器: 就绪</span>
+          <div class="skill-cd-track">
+            <div id="p1WeaponCdFill" class="skill-cd-fill weapon"></div>
+          </div>
+        </div>
+        <div class="skill-cd-row">
+          <span id="p1CharacterCdText" class="skill-cd-text">角色: 就绪</span>
+          <div class="skill-cd-track">
+            <div id="p1CharacterCdFill" class="skill-cd-fill character"></div>
+          </div>
+        </div>
+        <div id="p1StatusRow" class="status-row"></div>
+      </div>
+
+      <div class="hp-card">
+        <div class="hp-head">
+          <span class="side-tag p2">P2</span>
+          <span id="p2HealthText" class="hp-text">100 / 100</span>
+        </div>
+        <div class="hp-track">
+          <div id="p2HealthFill" class="hp-fill p2"></div>
+        </div>
+        <div class="skill-cd-row">
+          <span id="p2WeaponCdText" class="skill-cd-text">武器: 就绪</span>
+          <div class="skill-cd-track">
+            <div id="p2WeaponCdFill" class="skill-cd-fill weapon"></div>
+          </div>
+        </div>
+        <div class="skill-cd-row">
+          <span id="p2CharacterCdText" class="skill-cd-text">角色: 就绪</span>
+          <div class="skill-cd-track">
+            <div id="p2CharacterCdFill" class="skill-cd-fill character"></div>
+          </div>
+        </div>
+        <div id="p2StatusRow" class="status-row"></div>
+      </div>
+    </section>
+
+    <div id="battleTip" class="battle-tip hidden">战斗开始</div>
+
+    <section id="battleInfoPanel" class="battle-info-panel hidden" aria-live="polite">
+      <header class="battle-info-header">
+        <h2 id="battleInfoTitle">本局角色与武器说明</h2>
+        <p id="battleInfoHint">按 F1 继续战斗</p>
+      </header>
+      <div class="battle-info-grid">
+        <article class="battle-info-card">
+          <h3>P1</h3>
+          <p id="battleInfoP1Character"></p>
+          <p id="battleInfoP1Weapon"></p>
+        </article>
+        <article class="battle-info-card">
+          <h3>P2</h3>
+          <p id="battleInfoP2Character"></p>
+          <p id="battleInfoP2Weapon"></p>
+        </article>
+      </div>
+      <p id="battleInfoBoss" class="battle-info-boss hidden"></p>
+    </section>
+
+    <section id="bossHud" class="boss-hud hidden">
+      <div class="boss-name" id="bossName">Boss</div>
+      <div class="boss-track">
+        <div id="bossHealthFill" class="boss-fill"></div>
+      </div>
+      <div id="bossHealthText" class="boss-text">180 / 180</div>
+    </section>
+
+    <section id="selectionPanel" class="selection-panel hidden">
+      <header class="selection-header">
+        <h2 id="selectionTitle">选择项目</h2>
+        <p id="selectionSubtitle">滚轮、拖动或点击切换，确认后继续</p>
+      </header>
+
+      <div class="selection-body">
+        <div id="selectionWheel" class="selection-wheel" role="listbox" aria-label="可滚动选项">
+          <div id="selectionList" class="selection-list"></div>
+        </div>
+
+        <div class="selection-detail">
+          <h3 id="detailName">名称</h3>
+          <p id="detailDescription">介绍</p>
+          <ul id="detailStats" class="detail-stats"></ul>
+          <button id="confirmButton" class="confirm-button" type="button">确认选择</button>
+        </div>
+      </div>
+
+      <footer id="selectionPath" class="selection-path"></footer>
+    </section>
+
+    <section id="resultPanel" class="result-panel hidden">
+      <h2 id="resultTitle">结果</h2>
+      <p id="resultDescription"></p>
+      <button id="restartButton" class="confirm-button" type="button">返回开始界面</button>
+    </section>
+  </main>
+
+  <script src="./game-data.js"></script>
+  <script src="./game.js"></script>
+</body>
+</html>
