@@ -5,7 +5,7 @@
     "Images/Background/3.svg",
     "Images/Background/4.svg",
     "Images/Background/5.svg"
-  ],
+  ], 
   portals: {
     pvp: "Images/Portal/PVP.png",
     pve: "Images/Portal/PVE.svg"
@@ -13,7 +13,7 @@
   characters: [
     {
       id: "qing-lan",
-      name: "青岚行者",
+      name: "青岚行者", 
       sprite: {
         p1: "Images/Character/1p.svg",
         p2: "Images/Character/2P.svg"

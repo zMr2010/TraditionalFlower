@@ -127,7 +127,7 @@ const RANDOM_WEAPON_OPTION = {
   stats: {
     说明: "仅随机该玩家武器"
   },
-  randomPool: "weapons"
+  randomPool: "weapons" 
 };
 
 const AUTHOR_NAMES = ["Zhoumoubo", "仙蕊缀锦", "ChatGPT", "Mario"];
