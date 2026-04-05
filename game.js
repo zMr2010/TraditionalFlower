@@ -130,7 +130,7 @@ const RANDOM_WEAPON_OPTION = {
   randomPool: "weapons"
 };
 
-const AUTHOR_NAMES = ["Zhoumoubo", "Mario", "仙蕊缀锦", "ChatGPT"];
+const AUTHOR_NAMES = ["Zhoumoubo", "仙蕊缀锦", "ChatGPT", "Mario"];
 const DONATE_IMAGE_PATH = "Images/Money/WeChat.jpg";
 const NEGATIVE_LAYER_CAP = 5;
 
