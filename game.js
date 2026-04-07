@@ -181,10 +181,12 @@ function createPlayer(side, x) {
     baseMoveSpeedMultiplier: 1,
     speedBuffUntil: 0,
     speedDebuffUntil: 0,
+    bindUntil: 0,
+    bindStacks: [],
     permanentSlowPct: 0,
     poisonStacks: [],
     poisonTickAt: 0,
-    webZoneId: null,
+    webZoneIds: new Set(),
     webSlowMultiplier: 1,
     jumpLocked: false,
     maxJumps: 1,
@@ -891,7 +893,7 @@ function updateChiyanChargeState(player, skill, now, canAct) {
   const held = isCharacterSkillHeld(player);
 
   if (charge.active) {
-    if (!canAct) {
+    if (player.hp <= 0) {
       cancelChiyanCharge(player, true);
       return;
     }
@@ -943,10 +945,10 @@ function addChiyanChargeKnockback(player, knockbackMultiplier = 1) {
   if (!player.chiyanCharge?.active) {
     return;
   }
-  const breakNeed = skill.breakKnockback ?? 3;
+  const breakNeed = skill.breakKnockback ?? 4;
   const normalized = Math.max(0, knockbackMultiplier);
   player.chiyanCharge.breakAccum += normalized;
-  if (player.chiyanCharge.breakAccum > breakNeed) {
+  if (player.chiyanCharge.breakAccum >= breakNeed) {
     cancelChiyanCharge(player, true);
   }
 }
@@ -1157,12 +1159,13 @@ function updateBoss(dt, now) {
   const bossSpeedDebuff = now < (boss.speedDebuffUntil ?? 0)
     ? GAME_DATA.effects.sand.speedDebuffMultiplier
     : 1;
+  const bossBindMultiplier = getBindMoveMultiplier(boss, now);
   if (bossStunned) {
     boss.vx = approach(boss.vx, 0, GAME_DATA.tuning.friction * dt * 0.8);
   } else {
     boss.vx = approach(
       boss.vx,
-      direction * bossData.moveSpeed * bossSpeedDebuff,
+      direction * bossData.moveSpeed * bossSpeedDebuff * bossBindMultiplier * (boss.webSlowMultiplier ?? 1),
       GAME_DATA.tuning.accel * dt * 0.7
     );
 
@@ -1405,8 +1408,9 @@ function applyProjectileHitToPlayer(projectile, target, owner) {
   );
 
   if (projectile.effectType === "web") {
-    spawnWebZone(target, projectile.x, projectile.y, projectile.webTrapRadius ?? 92, projectile.owner);
-    showTip(`${target.id} 陷入缓行咒区域`);
+    const circle = getEntityHitCircle(target);
+    spawnWebZone(target, circle.x, circle.y, projectile.webTrapRadius ?? GAME_DATA.effects.web.trapRadius ?? 92, projectile.owner);
+    showTip(`${target.id} 被缓行咒命中：进入蛛网区域`);
   }
 }
 
@@ -1422,24 +1426,26 @@ function applyProjectileHitToBoss(projectile, boss, owner) {
     return;
   }
 
+  if (projectile.effectType === "web") {
+    const circle = getEntityHitCircle(boss);
+    spawnWebZone(boss, circle.x, circle.y, projectile.webTrapRadius ?? GAME_DATA.effects.web.trapRadius ?? 92, projectile.owner);
+  }
+
   boss.hp = Math.max(0, boss.hp - (projectile.damage ?? 0));
   boss.vx += Math.sign(projectile.vx || 0) * 180;
 }
 
 function spawnWebZone(target, x, y, radius, ownerId) {
   const web = GAME_DATA.effects.web;
+  const circle = target ? getEntityHitCircle(target) : { x, y };
   game.webZones.push({
     id: `web-${Math.random().toString(36).slice(2, 10)}`,
-    x,
-    y,
-    radius,
-    targetId: target.id,
     ownerId,
-    slowMultiplier: web.moveMultiplier,
-    permanentSlowPct: web.permanentSlowPct,
-    touching: false,
-    consumed: false,
-    expiresAt: Number.POSITIVE_INFINITY
+    x: circle.x,
+    y: circle.y,
+    radius: radius ?? web.trapRadius ?? 92,
+    createdAt: game.now,
+    expiresAt: game.now + (web.zoneDuration ?? web.bindDuration ?? 6)
   });
 }
 
@@ -1471,9 +1477,45 @@ function addPoisonStacks(target, count, duration) {
   }
 }
 
+function addBindStacks(target, count, duration) {
+  if (!target) {
+    return 0;
+  }
+  if (!target.bindStacks) {
+    target.bindStacks = [];
+  }
+  target.bindStacks = target.bindStacks.filter((expireAt) => expireAt > game.now);
+  const room = Math.max(0, NEGATIVE_LAYER_CAP - target.bindStacks.length);
+  const addCount = Math.min(count, room);
+  for (let i = 0; i < addCount; i += 1) {
+    target.bindStacks.push(game.now + duration);
+  }
+  target.bindUntil = target.bindStacks.reduce((latest, expireAt) => Math.max(latest, expireAt), 0);
+  return addCount;
+}
+
+function getBindLayerCount(target, now) {
+  if (!target) {
+    return 0;
+  }
+  if (!target.bindStacks) {
+    target.bindStacks = [];
+  }
+  target.bindStacks = target.bindStacks.filter((expireAt) => expireAt > now);
+  target.bindUntil = target.bindStacks.reduce((latest, expireAt) => Math.max(latest, expireAt), 0);
+  return clamp(target.bindStacks.length, 0, NEGATIVE_LAYER_CAP);
+}
+
+function getBindMoveMultiplier(target, now) {
+  const layers = getBindLayerCount(target, now);
+  if (layers <= 0) {
+    return 1;
+  }
+  return Math.pow(GAME_DATA.effects.web.bindMoveMultiplier ?? 0.89, layers);
+}
+
 function updateTimedEffects(now) {
   game.sandstorms = game.sandstorms.filter((storm) => now < storm.expiresAt);
-  game.webZones = game.webZones.filter((zone) => !zone.consumed || now < zone.expiresAt);
   game.fireCurtains = game.fireCurtains.filter((effect) => now < effect.expiresAt);
 
   for (const player of game.players) {
@@ -1482,9 +1524,11 @@ function updateTimedEffects(now) {
       cancelChiyanCharge(player, false);
     }
     tickPoisonDamage(player, now);
+    getBindLayerCount(player, now);
   }
   if (game.boss) {
     tickPoisonDamage(game.boss, now);
+    getBindLayerCount(game.boss, now);
   }
 }
 
@@ -1514,67 +1558,80 @@ function tickPoisonDamage(target, now) {
 }
 
 function refreshWebZoneEffects(now) {
-  for (const player of game.players) {
-    player.webSlowMultiplier = 1;
-    player.jumpLocked = false;
-    const zones = game.webZones.filter((zone) => !zone.consumed && zone.targetId === player.id);
+  const web = GAME_DATA.effects.web;
+  const activeZones = game.webZones.filter((zone) => now < zone.expiresAt);
+  const activeZoneMap = new Map(activeZones.map((zone) => [zone.id, zone]));
+  game.webZones = activeZones;
 
-    if (player.hp <= 0) {
-      for (const zone of zones) {
-        zone.consumed = true;
-        zone.touching = false;
-        zone.expiresAt = now + 0.15;
-      }
-      player.webZoneId = null;
-      continue;
-    }
+  for (const entity of getWebTrackedEntities()) {
+    const previousZones = entity.webZoneIds instanceof Set ? entity.webZoneIds : new Set();
+    const currentZones = new Set();
+    const circle = getEntityHitCircle(entity);
 
-    const circle = getEntityHitCircle(player);
-    let inAnyZone = false;
-    let slowMultiplier = 1;
-    let leftCount = 0;
-    let totalPermanentSlow = 0;
-
-    for (const zone of zones) {
-      const isInside = distance(zone.x, zone.y, circle.x, circle.y) <= zone.radius;
-      if (isInside) {
-        inAnyZone = true;
-        zone.touching = true;
-        slowMultiplier = Math.min(slowMultiplier, zone.slowMultiplier);
+    for (const zone of activeZones) {
+      if (!webZoneAffectsEntity(zone, entity)) {
         continue;
       }
-
-      if (zone.touching) {
-        zone.touching = false;
-        zone.consumed = true;
-        zone.expiresAt = now + 0.15;
-        leftCount += 1;
-        totalPermanentSlow += zone.permanentSlowPct;
+      const inside = distance(circle.x, circle.y, zone.x, zone.y) <= circle.radius + zone.radius;
+      if (inside) {
+        currentZones.add(zone.id);
       }
     }
 
-    if (leftCount > 0) {
-      const maxPermanentSlow = (GAME_DATA.effects.web.permanentSlowPct || 0.05) * NEGATIVE_LAYER_CAP;
-      player.permanentSlowPct = clamp(player.permanentSlowPct + totalPermanentSlow, 0, maxPermanentSlow);
-      showTip(`${player.id} 离开缓行咒：永久移速 -${Math.round(totalPermanentSlow * 100)}%`);
+    for (const zoneId of previousZones) {
+      if (currentZones.has(zoneId) || !activeZoneMap.has(zoneId)) {
+        continue;
+      }
+      const added = addBindStacks(entity, 1, web.bindDuration ?? 6);
+      if (added > 0) {
+        showTip(`${entity.id} 离开蛛网：束缚+${added}层`);
+      }
     }
 
-    player.webSlowMultiplier = inAnyZone ? slowMultiplier : 1;
-    player.jumpLocked = inAnyZone;
+    entity.webZoneIds = currentZones;
+    entity.webSlowMultiplier = currentZones.size > 0
+      ? Math.pow(web.zoneMoveMultiplier ?? web.bindMoveMultiplier ?? 0.89, clamp(currentZones.size, 0, NEGATIVE_LAYER_CAP))
+      : 1;
+    entity.jumpLocked = currentZones.size > 0 && Boolean(web.lockJumpWhileInside);
   }
 }
 
 function getEffectiveMoveSpeed(player, now) {
   let speed = GAME_DATA.tuning.moveSpeed * (player.baseMoveSpeedMultiplier ?? 1);
-  speed *= 1 - (player.permanentSlowPct ?? 0);
   if (now < (player.speedBuffUntil ?? 0)) {
     speed *= GAME_DATA.effects.sand.speedBuffMultiplier;
   }
   if (now < (player.speedDebuffUntil ?? 0)) {
     speed *= GAME_DATA.effects.sand.speedDebuffMultiplier;
   }
+  speed *= getBindMoveMultiplier(player, now);
   speed *= player.webSlowMultiplier ?? 1;
   return Math.max(120, speed);
+}
+
+function getWebTrackedEntities() {
+  const entities = [...game.players];
+  if (game.boss) {
+    entities.push(game.boss);
+  }
+  return entities.filter((entity) => entity && entity.hp > 0);
+}
+
+function webZoneAffectsEntity(zone, entity) {
+  if (!zone || !entity || zone.ownerId === entity.id) {
+    return false;
+  }
+  const owner = findActorById(zone.ownerId);
+  if (!owner) {
+    return false;
+  }
+  if (owner.id === "BOSS") {
+    return Boolean(entity.side);
+  }
+  if (entity.id === "BOSS") {
+    return Boolean(owner.side);
+  }
+  return owner.side !== entity.side;
 }
 
 function findActorById(id) {
@@ -1764,14 +1821,9 @@ function collectNegativeStatuses(player, now) {
     statuses.push({ symbol: "迟", layers: 1, title: "减速" });
   }
 
-  const perLayer = GAME_DATA.effects.web.permanentSlowPct || 0.05;
-  const permanentSlowLayers = clamp(
-    Math.round((player.permanentSlowPct ?? 0) / perLayer),
-    0,
-    NEGATIVE_LAYER_CAP
-  );
-  if (permanentSlowLayers > 0) {
-    statuses.push({ symbol: "缓", layers: permanentSlowLayers, title: "永久减速" });
+  const bindLayers = getBindLayerCount(player, now);
+  if (bindLayers > 0) {
+    statuses.push({ symbol: "缚", layers: bindLayers, title: "束缚" });
   }
 
   return statuses;
@@ -1995,10 +2047,12 @@ function preparePlayerForBattle(player) {
   player.dashKnockbackMultiplier = player.character?.dashKnockbackMultiplier ?? 1;
   player.speedBuffUntil = 0;
   player.speedDebuffUntil = 0;
+  player.bindUntil = 0;
+  player.bindStacks = [];
   player.permanentSlowPct = 0;
   player.poisonStacks = [];
   player.poisonTickAt = 0;
-  player.webZoneId = null;
+  player.webZoneIds = new Set();
   player.webSlowMultiplier = 1;
   player.jumpLocked = false;
   player.stunnedUntil = 0;
@@ -2050,6 +2104,11 @@ function createBoss(data) {
     poisonStacks: [],
     poisonTickAt: 0,
     speedDebuffUntil: 0,
+    bindUntil: 0,
+    bindStacks: [],
+    webZoneIds: new Set(),
+    webSlowMultiplier: 1,
+    jumpLocked: false,
     stunnedUntil: 0,
     skillReadyAt: 0,
     meleeReadyAt: 0
@@ -2124,14 +2183,18 @@ function resetToStart() {
   p2.speedBuffUntil = 0;
   p1.speedDebuffUntil = 0;
   p2.speedDebuffUntil = 0;
+  p1.bindUntil = 0;
+  p2.bindUntil = 0;
+  p1.bindStacks = [];
+  p2.bindStacks = [];
   p1.permanentSlowPct = 0;
   p2.permanentSlowPct = 0;
   p1.poisonStacks = [];
   p2.poisonStacks = [];
   p1.poisonTickAt = 0;
   p2.poisonTickAt = 0;
-  p1.webZoneId = null;
-  p2.webZoneId = null;
+  p1.webZoneIds = new Set();
+  p2.webZoneIds = new Set();
   p1.webSlowMultiplier = 1;
   p2.webSlowMultiplier = 1;
   p1.jumpLocked = false;
@@ -2191,11 +2254,11 @@ function render(now) {
   }
 
   drawWindMarks(now);
-  drawWebZones(now);
   drawFireCurtains(now);
   for (const projectile of game.projectiles) {
     drawProjectile(projectile);
   }
+  drawWebZones(now);
   drawPlayer(game.players[0], now);
   drawPlayer(game.players[1], now);
   if (game.mode === MODE.PVE && game.boss) {
@@ -2474,25 +2537,42 @@ function drawProjectile(projectile) {
 }
 
 function drawWebZones(now) {
-  for (const zone of game.webZones) {
-    if (zone.consumed || now >= zone.expiresAt) {
-      continue;
-    }
-    const pulse = 0.75 + Math.sin(now * 6 + zone.x * 0.01) * 0.12;
-    ctx.save();
-    ctx.globalAlpha = 0.22 * pulse;
-    ctx.fillStyle = "#7a8cff";
+  const activeZones = game.webZones.filter((zone) => now < zone.expiresAt);
+  if (activeZones.length === 0) {
+    return;
+  }
+
+  ctx.save();
+  for (const zone of activeZones) {
+    const lifeRate = clamp((zone.expiresAt - now) / Math.max(0.01, zone.expiresAt - zone.createdAt), 0, 1);
+    const alpha = 0.18 + lifeRate * 0.12;
+    const gradient = ctx.createRadialGradient(zone.x, zone.y, zone.radius * 0.18, zone.x, zone.y, zone.radius);
+    gradient.addColorStop(0, `rgba(218, 231, 255, ${(alpha + 0.12).toFixed(3)})`);
+    gradient.addColorStop(0.58, `rgba(124, 154, 214, ${alpha.toFixed(3)})`);
+    gradient.addColorStop(1, "rgba(57, 82, 125, 0)");
+    ctx.fillStyle = gradient;
     ctx.beginPath();
     ctx.arc(zone.x, zone.y, zone.radius, 0, Math.PI * 2);
     ctx.fill();
-    ctx.globalAlpha = 0.62 * pulse;
-    ctx.strokeStyle = "#b4bdff";
+
+    ctx.strokeStyle = `rgba(232, 242, 255, ${(0.32 + lifeRate * 0.12).toFixed(3)})`;
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.arc(zone.x, zone.y, zone.radius, 0, Math.PI * 2);
+    ctx.arc(zone.x, zone.y, zone.radius * 0.92, 0, Math.PI * 2);
     ctx.stroke();
-    ctx.restore();
+
+    for (let i = 0; i < 6; i += 1) {
+      const angle = now * 1.35 + zone.createdAt * 0.7 + i * (Math.PI / 3);
+      const inner = zone.radius * 0.26;
+      const outer = zone.radius * 0.88;
+      ctx.strokeStyle = `rgba(243, 248, 255, ${(0.2 + i * 0.02).toFixed(3)})`;
+      ctx.beginPath();
+      ctx.moveTo(zone.x + Math.cos(angle) * inner, zone.y + Math.sin(angle) * inner);
+      ctx.lineTo(zone.x + Math.cos(angle) * outer, zone.y + Math.sin(angle) * outer);
+      ctx.stroke();
+    }
   }
+  ctx.restore();
 }
 
 function drawSandstorms(now) {
@@ -2694,4 +2774,3 @@ function getCharacterSkillPanelText(character) {
 }
 
 preloadAssets().then(init);
-

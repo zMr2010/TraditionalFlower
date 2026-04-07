@@ -50,7 +50,7 @@
         type: "flame-curtain",
         cooldown: 6,
         chargeSeconds: 3,
-        breakKnockback: 3,
+        breakKnockback: 4,
         damage: 7,
         effectSeconds: 0.42
       },
@@ -246,11 +246,11 @@
       id: "slow-curse",
       name: "缓行咒",
       icon: "Images/Weapon/web.svg",
-      description: "命中后生成区域减速禁跳，离场后永久减速。",
+      description: "命中后生成蛛网区域，目标离开区域时叠加“束缚”。",
       stats: {
         冷却: "1 秒",
         伤害: "3",
-        特性: "区域减速禁跳，离场永久-5%移速"
+        特性: "离开蛛网区域时叠加束缚：6秒，移速-11%，最多5层"
       },
       skill: {
         type: "web",
@@ -335,8 +335,12 @@
       stormDuration: 10
     },
     web: {
-      moveMultiplier: 0.56,
-      permanentSlowPct: 0.05
+      bindDuration: 6,
+      bindMoveMultiplier: 0.89,
+      zoneDuration: 6,
+      zoneMoveMultiplier: 0.89,
+      trapRadius: 92,
+      lockJumpWhileInside: false
     }
   },
   tuning: {
