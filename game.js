@@ -195,6 +195,7 @@ function createPlayer(side, x) {
     dashKnockbackMultiplier: 1,
     stunnedUntil: 0,
     weaponSkillReadyAt: 0,
+    weaponPassiveReadyAt: 0,
     characterSkillReadyAt: 0,
     dashUntil: 0,
     dashRecoverAt: 0,
@@ -1092,6 +1093,8 @@ function spawnForwardSkillProjectile(player, weapon, skill) {
     damage: skill.damage ?? 0,
     stun: skill.stun ?? 0,
     knockbackMultiplier: skill.knockbackMultiplier ?? 1,
+    healOnHit: skill.healOnHit ?? 0,
+    healCooldown: skill.healCooldown ?? 0,
     icon: weapon.icon,
     spin: 0,
     spinSpeed: skill.spinSpeed ?? 9,
@@ -1399,13 +1402,16 @@ function applyProjectileHitToPlayer(projectile, target, owner) {
   }
 
   const knockback = Math.sign(projectile.vx || 0) * 210;
-  applyHitToPlayer(
+  const landed = applyHitToPlayer(
     target,
     projectile.damage ?? 0,
     projectile.stun ?? 0,
     knockback,
     projectile.knockbackMultiplier ?? 1
   );
+  if (landed) {
+    tryTriggerWeaponOnHit(projectile, owner);
+  }
 
   if (projectile.effectType === "web") {
     const circle = getEntityHitCircle(target);
@@ -1433,6 +1439,7 @@ function applyProjectileHitToBoss(projectile, boss, owner) {
 
   boss.hp = Math.max(0, boss.hp - (projectile.damage ?? 0));
   boss.vx += Math.sign(projectile.vx || 0) * 180;
+  tryTriggerWeaponOnHit(projectile, owner);
 }
 
 function spawnWebZone(target, x, y, radius, ownerId) {
@@ -1474,6 +1481,28 @@ function addPoisonStacks(target, count, duration) {
   }
   if (!target.poisonTickAt || target.poisonTickAt < game.now) {
     target.poisonTickAt = game.now + GAME_DATA.effects.sand.poisonTickInterval;
+  }
+}
+
+function tryTriggerWeaponOnHit(projectile, owner) {
+  if (!projectile || !owner || !owner.side || owner.hp <= 0) {
+    return;
+  }
+  const healAmount = projectile.healOnHit ?? 0;
+  const healCooldown = projectile.healCooldown ?? 0;
+  if (healAmount <= 0 || healCooldown <= 0) {
+    return;
+  }
+  if (game.now < (owner.weaponPassiveReadyAt ?? 0)) {
+    return;
+  }
+
+  owner.weaponPassiveReadyAt = game.now + healCooldown;
+  const nextHp = Math.min(owner.maxHp, owner.hp + healAmount);
+  const actualHeal = nextHp - owner.hp;
+  owner.hp = nextHp;
+  if (actualHeal > 0) {
+    showTip(`${owner.id} 的饮血牙回复了 ${actualHeal} 点生命`);
   }
 }
 
@@ -2057,6 +2086,7 @@ function preparePlayerForBattle(player) {
   player.jumpLocked = false;
   player.stunnedUntil = 0;
   player.weaponSkillReadyAt = 0;
+  player.weaponPassiveReadyAt = 0;
   player.characterSkillReadyAt = 0;
   player.dashUntil = 0;
   player.dashRecoverAt = 0;
@@ -2201,6 +2231,8 @@ function resetToStart() {
   p2.jumpLocked = false;
   p1.weaponSkillReadyAt = 0;
   p2.weaponSkillReadyAt = 0;
+  p1.weaponPassiveReadyAt = 0;
+  p2.weaponPassiveReadyAt = 0;
   p1.characterSkillReadyAt = 0;
   p2.characterSkillReadyAt = 0;
   p1.windMark = null;

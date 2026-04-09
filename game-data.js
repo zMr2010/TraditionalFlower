@@ -118,17 +118,17 @@
       id: "chaos-orb",
       name: "混沌宝珠",
       icon: "Images/Weapon/basic.svg",
-      description: "向面向方向发射混沌宝珠，命中造成眩晕。",
+      description: "向面向方向发射基础混沌宝珠，弹道稳定。",
       stats: {
         冷却: "1 秒",
         伤害: "3",
-        控制: "眩晕 0.5 秒"
+        控制: "无眩晕"
       },
       skill: {
         type: "projectile",
         speed: 760,
         damage: 3,
-        stun: 0.5,
+        stun: 0,
         cooldown: 1,
         radius: 15,
         life: 3.5,
@@ -143,13 +143,13 @@
       stats: {
         冷却: "0.9 秒",
         伤害: "2",
-        控制: "眩晕 0.35 秒"
+        控制: "无眩晕"
       },
       skill: {
         type: "projectile",
         speed: 920,
         damage: 2,
-        stun: 0.35,
+        stun: 0,
         cooldown: 0.9,
         radius: 14,
         life: 3.2,
@@ -184,18 +184,43 @@
       description: "高速旋转的飞刃，弹道快，伤害高。",
       stats: {
         冷却: "1 秒",
-        伤害: "10",
+        伤害: "5",
+        控制: "无眩晕",
         特性: "高速自转与快弹道"
       },
       skill: {
         type: "projectile",
         speed: 1080,
-        damage: 10,
-        stun: 0.15,
+        damage: 5,
+        stun: 0,
         cooldown: 1,
         radius: 13,
         life: 2.6,
         spinSpeed: 22
+      }
+    },
+    {
+      id: "blood-fang",
+      name: "饮血牙",
+      icon: "Images/Weapon/fang.svg",
+      description: "命中造成伤害，并在吸血冷却结束时回复持有者生命，飞行时不旋转。",
+      stats: {
+        冷却: "1 秒",
+        伤害: "4",
+        控制: "无眩晕",
+        特性: "命中回复 2 点生命，回血效果每 3 秒触发一次"
+      },
+      skill: {
+        type: "fang",
+        speed: 780,
+        damage: 4,
+        stun: 0,
+        cooldown: 1,
+        radius: 15,
+        life: 3.1,
+        spinSpeed: 0,
+        healOnHit: 2,
+        healCooldown: 3
       }
     },
     {
@@ -256,7 +281,7 @@
         type: "web",
         speed: 640,
         damage: 3,
-        stun: 0.05,
+        stun: 0,
         cooldown: 1,
         radius: 16,
         life: 3,
