@@ -304,10 +304,32 @@ function init() {
 
 function bindInput() {
   const preventKeys = new Set(["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space"]);
-  window.addEventListener("keydown", (event) => {
+  const blockedInspectorKeys = new Set(["i", "j", "c", "k"]);
+
+  function isBlockedInspectShortcut(event) {
+    const key = String(event.key || "").toLowerCase();
     if (event.code === "F12") {
+      return true;
+    }
+    if ((event.ctrlKey || event.metaKey) && event.shiftKey && blockedInspectorKeys.has(key)) {
+      return true;
+    }
+    if (event.metaKey && event.altKey && blockedInspectorKeys.has(key)) {
+      return true;
+    }
+    if ((event.ctrlKey || event.metaKey) && key === "u") {
+      return true;
+    }
+    return false;
+  }
+
+  window.addEventListener("keydown", (event) => {
+    if (isBlockedInspectShortcut(event)) {
       event.preventDefault();
       event.stopPropagation();
+      if (typeof event.stopImmediatePropagation === "function") {
+        event.stopImmediatePropagation();
+      }
       return;
     }
     if (event.code === "F1") {
@@ -342,6 +364,14 @@ function bindInput() {
 
   window.addEventListener("keyup", (event) => {
     keysDown.delete(event.code);
+  });
+
+  window.addEventListener("contextmenu", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (typeof event.stopImmediatePropagation === "function") {
+      event.stopImmediatePropagation();
+    }
   });
 
   window.addEventListener("blur", () => {
@@ -1054,11 +1084,11 @@ function castChiyanFlameCurtain(player, skill, now) {
       continue;
     }
     if (target.id === "BOSS") {
-      target.hp = Math.max(0, target.hp - (skill.damage ?? 7));
+      target.hp = Math.max(0, target.hp - (skill.damage ?? 15));
       target.vx += player.facing * 300;
       target.stunnedUntil = Math.max(target.stunnedUntil ?? 0, now + 0.32);
     } else {
-      applyHitToPlayer(target, skill.damage ?? 7, 0.32, player.facing * 280, 1);
+      applyHitToPlayer(target, skill.damage ?? 15, 0.32, player.facing * 280, 1);
     }
   }
 
@@ -2547,7 +2577,7 @@ function drawBoss(boss, now) {
   if (poisonCount > 0) {
     ctx.fillStyle = "rgba(201, 255, 180, 0.96)";
     ctx.font = "bold 13px Microsoft YaHei";
-    ctx.fillText(`涓瘨 x${poisonCount}`, boss.x + boss.w / 2, boss.y + boss.h + 36);
+    ctx.fillText(`中毒 x${poisonCount}`, boss.x + boss.w / 2, boss.y + boss.h + 36);
   }
 }
 
@@ -2794,7 +2824,7 @@ function getCharacterSkillPanelText(character) {
     return "风印瞬移/落点小范围2伤害（冷却6s）";
   }
   if (skill.type === "flame-curtain") {
-    return "长按蓄力3s，成功后前方全域7伤害（冷却6s）";
+    return "长按蓄力3s，成功后前方全域15伤害（冷却6s）";
   }
   if (skill.type === "verdant-revival") {
     return "被动：濒死复苏20%生命并眩晕敌方3s（每局1次）";

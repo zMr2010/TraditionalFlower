@@ -4,6 +4,44 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>传统文花大乱斗</title>
+  <script>
+    (() => {
+      const blockedInspectorKeys = new Set(["i", "j", "c", "k"]);
+
+      function stopBrowserInspect(event) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (typeof event.stopImmediatePropagation === "function") {
+          event.stopImmediatePropagation();
+        }
+        return false;
+      }
+
+      function isBlockedInspectShortcut(event) {
+        const key = String(event.key || "").toLowerCase();
+        if (event.code === "F12") {
+          return true;
+        }
+        if ((event.ctrlKey || event.metaKey) && event.shiftKey && blockedInspectorKeys.has(key)) {
+          return true;
+        }
+        if (event.metaKey && event.altKey && blockedInspectorKeys.has(key)) {
+          return true;
+        }
+        if ((event.ctrlKey || event.metaKey) && key === "u") {
+          return true;
+        }
+        return false;
+      }
+
+      window.addEventListener("keydown", (event) => {
+        if (isBlockedInspectShortcut(event)) {
+          stopBrowserInspect(event);
+        }
+      }, true);
+      window.addEventListener("contextmenu", stopBrowserInspect, true);
+    })();
+  </script>
   <link rel="stylesheet" href="./styles.css">
 </head>
 <body> 
@@ -14,7 +52,7 @@
       <h1>传统文花大乱斗</h1>
       <p>1P: W/A/D 移动，S 角色技能，K 武器技能，J 冲撞，Y 投降</p>
       <p>2P: ↑/←/→ 移动，↓ 角色技能，小键盘 2 武器技能，小键盘 1 冲撞，P 投降</p>
-      <p>F1: 战斗中查看说明并暂停，F3: 显示碰撞箱，F12: 已禁用</p>
+      <p>F1: 战斗中查看说明并暂停，F3: 显示碰撞箱，开发者快捷键与右键检查: 已拦截</p>
       <p>开始界面中，双方同时进入同一传送门并停留 2 秒即可进入对应模式</p>
     </div>
 

@@ -51,7 +51,7 @@
         cooldown: 6,
         chargeSeconds: 3,
         breakKnockback: 4,
-        damage: 7,
+        damage: 15,
         effectSeconds: 0.42
       },
       stats: {
@@ -70,7 +70,7 @@
         p2: "Images/Character/2P.svg"
       },
       description: "高生命防守角色，带一次复苏反制。",
-      baseHp: 150,
+      baseHp: 120,
       moveSpeedMultiplier: 0.9,
       characterSkill: {
         type: "verdant-revival",
@@ -79,7 +79,7 @@
         stunSeconds: 3
       },
       stats: {
-        生命: 150,
+        生命: 120,
         移速倍率: "0.90x",
         机动: 4,
         控场: 7,
