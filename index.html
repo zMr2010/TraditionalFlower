@@ -50,17 +50,43 @@
 
     <div id="startHint" class="start-hint">
       <h1>传统文花大乱斗</h1>
-      <p>1P: W/A/D 移动，S 角色技能，K 武器技能，J 冲撞，Y 投降</p>
-      <p>2P: ↑/←/→ 移动，↓ 角色技能，小键盘 2 武器技能，小键盘 1 冲撞，P 投降</p>
+      <p>1P: W/A/D 移动，S 角色技能，K 武器技能，J 冲撞（消耗闪能），Y 投降</p>
+      <p>2P: ↑/←/→ 移动，↓ 角色技能，小键盘 2 武器技能，小键盘 1 冲撞（消耗闪能），P 投降</p>
       <p>F1: 战斗中查看说明并暂停，F3: 显示碰撞箱，开发者快捷键与右键检查: 已拦截</p>
       <p>开始界面中，双方同时进入同一传送门并停留 2 秒即可进入对应模式</p>
     </div>
 
     <button id="startMenuButton" class="start-menu-button" type="button" aria-label="开始菜单">⋯</button>
     <div id="startMenuPanel" class="start-menu-panel hidden">
+      <button id="showBagButton" class="start-menu-item" type="button">背包</button>
       <button id="showAuthorsButton" class="start-menu-item" type="button">查看作者</button>
       <button id="showDonateButton" class="start-menu-item" type="button">打赏支持</button>
     </div>
+
+    <section id="authOverlay" class="auth-overlay">
+      <article class="auth-card">
+        <h2 id="authTitle">账号登录</h2>
+        <p id="authSubtitle" class="auth-subtitle">请先登录或注册账号。账号存档保存在本地 Cookie 中。</p>
+        <div class="auth-mode-row">
+          <button id="authLoginTab" class="auth-mode-button active" type="button">登录</button>
+          <button id="authRegisterTab" class="auth-mode-button" type="button">注册</button>
+        </div>
+        <label class="auth-field">
+          <span>账号</span>
+          <input id="authUsername" class="auth-input" type="text" maxlength="24" autocomplete="username">
+        </label>
+        <label class="auth-field">
+          <span>密码</span>
+          <input id="authPassword" class="auth-input" type="password" maxlength="32" autocomplete="current-password">
+        </label>
+        <label id="authConfirmRow" class="auth-field hidden">
+          <span>确认密码</span>
+          <input id="authConfirmPassword" class="auth-input" type="password" maxlength="32" autocomplete="new-password">
+        </label>
+        <p id="authMessage" class="auth-message">首次进入请注册一个新账号。</p>
+        <button id="authSubmit" class="confirm-button" type="button">登录</button>
+      </article>
+    </section>
 
     <section id="startOverlay" class="start-overlay hidden">
       <article class="start-overlay-card">
@@ -94,6 +120,12 @@
             <div id="p1CharacterCdFill" class="skill-cd-fill character"></div>
           </div>
         </div>
+        <div class="skill-cd-row">
+          <span id="p1DashText" class="skill-cd-text">闪能: 3 / 3</span>
+          <div class="skill-cd-track">
+            <div id="p1DashFill" class="skill-cd-fill weapon"></div>
+          </div>
+        </div>
         <div id="p1StatusRow" class="status-row"></div>
       </div>
 
@@ -115,6 +147,12 @@
           <span id="p2CharacterCdText" class="skill-cd-text">角色: 就绪</span>
           <div class="skill-cd-track">
             <div id="p2CharacterCdFill" class="skill-cd-fill character"></div>
+          </div>
+        </div>
+        <div class="skill-cd-row">
+          <span id="p2DashText" class="skill-cd-text">闪能: 3 / 3</span>
+          <div class="skill-cd-track">
+            <div id="p2DashFill" class="skill-cd-fill weapon"></div>
           </div>
         </div>
         <div id="p2StatusRow" class="status-row"></div>

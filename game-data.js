@@ -224,6 +224,33 @@
       }
     },
     {
+      id: "kunpeng-dust",
+      name: "鲲鹏尘",
+      icon: "Images/Weapon/dust.svg",
+      description: "每4秒生成一枚鲲鹏尘环绕自身，武器键可发射一枚，环绕或命中都可造成伤害。",
+      stats: {
+        冷却: "无冷却",
+        伤害: "2",
+        特性: "每4秒生成1枚，环绕上限20，环绕碰撞或发射命中都可造成伤害"
+      },
+      skill: {
+        type: "kunpeng-dust",
+        speed: 920,
+        damage: 2,
+        stun: 0,
+        cooldown: 0,
+        radius: 11,
+        life: 3.6,
+        spinSpeed: 0,
+        generationInterval: 4,
+        maxOrbiting: 20,
+        orbitSpeed: 1.9,
+        orbitPadding: 4,
+        orbitRadiusStep: 18,
+        orbitRingSize: 8
+      }
+    },
+    {
       id: "mountain-stone",
       name: "镇岳石",
       icon: "Images/Weapon/heavy.svg",
@@ -378,9 +405,11 @@
     friction: 1800,
     dashSpeed: 960,
     dashDuration: 0.18,
-    dashSelfStun: 1,
+    dashSelfStun: 0,
     dashDamage: 5,
-    dashCooldown: 0.65,
+    dashCooldown: 0,
+    dashChargeMax: 3,
+    dashChargeInterval: 3,
     portalRadius: 94,
     portalEntrySeconds: 2,
     portalSwitchSeconds: 5

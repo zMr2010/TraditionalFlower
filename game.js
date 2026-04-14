@@ -36,10 +36,14 @@ const ui = {
   p2WeaponCdFill: document.getElementById("p2WeaponCdFill"),
   p1CharacterCdFill: document.getElementById("p1CharacterCdFill"),
   p2CharacterCdFill: document.getElementById("p2CharacterCdFill"),
+  p1DashFill: document.getElementById("p1DashFill"),
+  p2DashFill: document.getElementById("p2DashFill"),
   p1WeaponCdText: document.getElementById("p1WeaponCdText"),
   p2WeaponCdText: document.getElementById("p2WeaponCdText"),
   p1CharacterCdText: document.getElementById("p1CharacterCdText"),
   p2CharacterCdText: document.getElementById("p2CharacterCdText"),
+  p1DashText: document.getElementById("p1DashText"),
+  p2DashText: document.getElementById("p2DashText"),
   p1StatusRow: document.getElementById("p1StatusRow"),
   p2StatusRow: document.getElementById("p2StatusRow"),
   battleTip: document.getElementById("battleTip"),
@@ -193,6 +197,9 @@ function createPlayer(side, x) {
     jumpCount: 0,
     dashDamageMultiplier: 1,
     dashKnockbackMultiplier: 1,
+    dashCharges: GAME_DATA.tuning.dashChargeMax ?? 3,
+    dashChargeMax: GAME_DATA.tuning.dashChargeMax ?? 3,
+    dashChargeNextAt: 0,
     stunnedUntil: 0,
     weaponSkillReadyAt: 0,
     weaponPassiveReadyAt: 0,
@@ -202,6 +209,8 @@ function createPlayer(side, x) {
     dashCooldownUntil: 0,
     dashRecoveryPending: false,
     dashHitMarks: new Set(),
+    kunpengDusts: [],
+    nextKunpengDustAt: 0,
     windMark: null,
     chiyanCharge: {
       active: false,
@@ -584,6 +593,7 @@ function updateBattle(dt, now) {
   updateTip(now);
   ui.phaseBanner.textContent = game.mode === MODE.PVE ? "战斗界面 (PvE)" : "战斗界面 (PvP)";
   updateTimedEffects(now);
+  updateDashChargeStates(now);
   refreshWebZoneEffects(now);
 
   const p1 = game.players[0];
@@ -591,6 +601,7 @@ function updateBattle(dt, now) {
   updatePlayerMovement(p1, dt, now, true);
   updatePlayerMovement(p2, dt, now, true);
   refreshWebZoneEffects(now);
+  updateKunpengDustStates(now);
 
   if (isPressed(p1.controls.surrender)) {
     surrenderPlayer(p1);
@@ -629,7 +640,7 @@ function updateTip(now) {
   if (game.phase === PHASE.BATTLE) {
     ui.battleTip.textContent = game.mode === MODE.PVE
       ? "Boss战：小键盘9可触发Boss投降"
-      : "PvP：Y/P投降，J/小键盘1冲撞，K/小键盘2武器，S/下键角色技能";
+      : "PvP：Y/P投降，J/小键盘1冲撞（消耗闪能），K/小键盘2武器，S/下键角色技能";
   }
 }
 
@@ -819,10 +830,6 @@ function updatePlayerMovement(player, dt, now, combatEnabled) {
 
   if (player.dashUntil > now) {
     player.vx = player.facing * tuning.dashSpeed * (moveSpeed / tuning.moveSpeed);
-  } else if (player.dashRecoveryPending && now >= player.dashRecoverAt) {
-    player.dashRecoveryPending = false;
-    player.stunnedUntil = Math.max(player.stunnedUntil, now + tuning.dashSelfStun);
-    showTip(`${player.id} 冲撞后进入眩晕`);
   }
 
   player.vy += tuning.gravity * dt;
@@ -860,13 +867,17 @@ function tryDash(player, now) {
   if (player.chiyanCharge?.active) {
     return;
   }
-  if (now < player.dashCooldownUntil || now < player.stunnedUntil || player.hp <= 0) {
+  if (player.dashUntil > now || now < player.stunnedUntil || player.hp <= 0) {
+    return;
+  }
+  if (!consumeDashCharge(player, now)) {
+    showTip(`${player.id} 闪能不足`);
     return;
   }
   player.dashUntil = now + tuning.dashDuration;
-  player.dashRecoverAt = player.dashUntil;
-  player.dashRecoveryPending = true;
-  player.dashCooldownUntil = now + tuning.dashCooldown;
+  player.dashRecoverAt = 0;
+  player.dashRecoveryPending = false;
+  player.dashCooldownUntil = 0;
   player.dashHitMarks.clear();
 }
 
@@ -874,12 +885,19 @@ function tryCastWeaponSkill(player, now) {
   if (player.chiyanCharge?.active) {
     return;
   }
-  if (now < player.weaponSkillReadyAt || now < player.stunnedUntil || player.hp <= 0) {
+  if (now < player.stunnedUntil || player.hp <= 0) {
     return;
   }
   const weapon = player.weapon || GAME_DATA.weapons[0];
   const skill = weapon.skill ?? weapon.bullet;
   if (!skill) {
+    return;
+  }
+  if (skill.type === "kunpeng-dust") {
+    fireKunpengDust(player, weapon, skill, now);
+    return;
+  }
+  if (now < player.weaponSkillReadyAt) {
     return;
   }
   player.weaponSkillReadyAt = now + skill.cooldown;
@@ -889,6 +907,184 @@ function tryCastWeaponSkill(player, now) {
     return;
   }
   spawnForwardSkillProjectile(player, weapon, skill);
+}
+
+function consumeDashCharge(player, now) {
+  if ((player.dashCharges ?? 0) <= 0) {
+    return false;
+  }
+  const interval = GAME_DATA.tuning.dashChargeInterval ?? 3;
+  const max = player.dashChargeMax ?? GAME_DATA.tuning.dashChargeMax ?? 3;
+  const wasFull = (player.dashCharges ?? 0) >= max;
+  player.dashCharges -= 1;
+  if (player.dashCharges < max && (wasFull || !(player.dashChargeNextAt > now))) {
+    player.dashChargeNextAt = now + interval;
+  }
+  return true;
+}
+
+function updateDashChargeStates(now) {
+  const interval = GAME_DATA.tuning.dashChargeInterval ?? 3;
+  for (const player of game.players) {
+    const max = player.dashChargeMax ?? GAME_DATA.tuning.dashChargeMax ?? 3;
+    player.dashChargeMax = max;
+    player.dashCharges = clamp(player.dashCharges ?? max, 0, max);
+    if (player.dashCharges >= max) {
+      player.dashChargeNextAt = 0;
+      continue;
+    }
+    if (!(player.dashChargeNextAt > now)) {
+      if (!(player.dashChargeNextAt > 0)) {
+        player.dashChargeNextAt = now + interval;
+      }
+      while (player.dashCharges < max && now >= player.dashChargeNextAt) {
+        player.dashCharges += 1;
+        if (player.dashCharges >= max) {
+          player.dashChargeNextAt = 0;
+          break;
+        }
+        player.dashChargeNextAt += interval;
+      }
+    }
+  }
+}
+
+function updateKunpengDustStates(now) {
+  for (const player of game.players) {
+    const skill = player.weapon?.skill ?? player.weapon?.bullet;
+    if (!skill || skill.type !== "kunpeng-dust" || player.hp <= 0) {
+      player.kunpengDusts = [];
+      player.nextKunpengDustAt = 0;
+      continue;
+    }
+
+    const interval = skill.generationInterval ?? 4;
+    const maxOrbiting = skill.maxOrbiting ?? 20;
+    if (player.kunpengDusts.length >= maxOrbiting) {
+      player.nextKunpengDustAt = now + interval;
+    } else {
+      if (!(player.nextKunpengDustAt > 0)) {
+        player.nextKunpengDustAt = now + interval;
+      }
+      while (player.kunpengDusts.length < maxOrbiting && now >= player.nextKunpengDustAt) {
+        player.kunpengDusts.push({
+          id: `dust-${Math.random().toString(36).slice(2, 10)}`,
+          angleSeed: Math.random() * Math.PI * 2,
+          x: player.x + player.w / 2,
+          y: player.y + player.h * 0.45,
+          radius: skill.radius ?? 11
+        });
+        player.nextKunpengDustAt += interval;
+      }
+    }
+
+    layoutKunpengDusts(player, skill, now);
+    resolveKunpengDustOrbitHits(player, skill);
+  }
+}
+
+function layoutKunpengDusts(player, skill, now) {
+  const dusts = player.kunpengDusts ?? [];
+  if (dusts.length === 0) {
+    return;
+  }
+  const ringSize = skill.orbitRingSize ?? 8;
+  const visualRect = getEntityVisualRect(player);
+  const orbitPadding = skill.orbitPadding ?? 4;
+  const radiusStep = skill.orbitRadiusStep ?? 18;
+  const orbitSpeed = skill.orbitSpeed ?? 1.9;
+  const centerX = visualRect.x + visualRect.w / 2;
+  const centerY = visualRect.y + visualRect.h / 2;
+
+  for (let i = 0; i < dusts.length; i += 1) {
+    const dust = dusts[i];
+    const ring = Math.floor(i / ringSize);
+    const indexInRing = i % ringSize;
+    const itemsInRing = Math.min(ringSize, dusts.length - ring * ringSize);
+    const angle = now * orbitSpeed + dust.angleSeed + indexInRing * (Math.PI * 2 / Math.max(1, itemsInRing));
+    dust.radius = skill.radius ?? 11;
+    const baseRadius = Math.hypot(visualRect.w / 2, visualRect.h / 2) + dust.radius + orbitPadding;
+    const radius = baseRadius + ring * radiusStep;
+    dust.x = centerX + Math.cos(angle) * radius;
+    dust.y = centerY + Math.sin(angle) * radius;
+  }
+}
+
+function resolveKunpengDustOrbitHits(player, skill) {
+  const dusts = player.kunpengDusts ?? [];
+  if (dusts.length === 0) {
+    return;
+  }
+
+  for (let i = dusts.length - 1; i >= 0; i -= 1) {
+    const dust = dusts[i];
+    let hit = false;
+    if (game.mode === MODE.PVP) {
+      const target = player.id === "P1" ? game.players[1] : game.players[0];
+      hit = tryOrbitDustHitPlayer(player, dust, target, skill);
+    } else if (game.boss) {
+      hit = tryOrbitDustHitBoss(player, dust, game.boss, skill);
+    }
+    if (hit) {
+      dusts.splice(i, 1);
+    }
+  }
+}
+
+function tryOrbitDustHitPlayer(owner, dust, target, skill) {
+  if (!target || target.hp <= 0) {
+    return false;
+  }
+  const circle = getEntityHitCircle(target);
+  if (distance(dust.x, dust.y, circle.x, circle.y) > dust.radius + circle.radius) {
+    return false;
+  }
+  const dir = Math.sign(circle.x - dust.x) || owner.facing || 1;
+  return applyHitToPlayer(target, skill.damage ?? 2, 0, dir * 130, 1);
+}
+
+function tryOrbitDustHitBoss(owner, dust, boss, skill) {
+  if (!boss || boss.hp <= 0) {
+    return false;
+  }
+  const circle = getEntityHitCircle(boss);
+  if (distance(dust.x, dust.y, circle.x, circle.y) > dust.radius + circle.radius) {
+    return false;
+  }
+  const dir = Math.sign(circle.x - dust.x) || owner.facing || 1;
+  boss.hp = Math.max(0, boss.hp - (skill.damage ?? 2));
+  boss.vx += dir * 120;
+  return true;
+}
+
+function fireKunpengDust(player, weapon, skill, now) {
+  if (!player.kunpengDusts || player.kunpengDusts.length === 0) {
+    showTip(`${player.id} 暂无鲲鹏尘`);
+    return;
+  }
+  layoutKunpengDusts(player, skill, now);
+  const dust = player.kunpengDusts.shift();
+  game.projectiles.push({
+    owner: player.id,
+    sourceType: "player",
+    effectType: "kunpeng-dust",
+    weaponId: weapon.id,
+    x: dust?.x ?? (player.x + player.w / 2),
+    y: dust?.y ?? (player.y + player.h * 0.45),
+    vx: player.facing * (skill.speed ?? 920),
+    vy: 0,
+    gravity: 0,
+    radius: skill.radius ?? 11,
+    life: skill.life ?? 3.6,
+    damage: skill.damage ?? 2,
+    stun: 0,
+    knockbackMultiplier: 1,
+    healOnHit: 0,
+    healCooldown: 0,
+    icon: weapon.icon,
+    spin: 0,
+    spinSpeed: skill.spinSpeed ?? 0
+  });
 }
 
 function getCharacterSkillConfig(player) {
@@ -1342,7 +1538,7 @@ function resolveDashHit(attacker, defender, now) {
   attacker.dashHitMarks.add(defender.id);
   const damage = Math.max(1, Math.round(GAME_DATA.tuning.dashDamage * (attacker.dashDamageMultiplier ?? 1)));
   const knockback = attacker.facing * 330 * (attacker.dashKnockbackMultiplier ?? 1);
-  applyHitToPlayer(defender, damage, 0.32, knockback, attacker.dashKnockbackMultiplier ?? 1);
+  applyHitToPlayer(defender, damage, 0, knockback, attacker.dashKnockbackMultiplier ?? 1);
 }
 
 function resolveDashHitToBoss(attacker, boss, now) {
@@ -1775,6 +1971,7 @@ function updateHud() {
     ui.p1CharacterCdFill,
     ui.p1CharacterCdText
   );
+  updatePlayerDashHud(p1, ui.p1DashFill, ui.p1DashText);
   renderNegativeStatusRow(p1, ui.p1StatusRow, game.now);
   updatePlayerSkillHud(
     p2,
@@ -1783,6 +1980,7 @@ function updateHud() {
     ui.p2CharacterCdFill,
     ui.p2CharacterCdText
   );
+  updatePlayerDashHud(p2, ui.p2DashFill, ui.p2DashText);
   renderNegativeStatusRow(p2, ui.p2StatusRow, game.now);
 
   if (game.mode === MODE.PVE && game.boss) {
@@ -1796,12 +1994,25 @@ function updateHud() {
 function updatePlayerSkillHud(player, weaponFill, weaponText, characterFill, characterText) {
   const now = game.now;
   const weaponSkill = player.weapon?.skill ?? player.weapon?.bullet;
-  const weaponCooldown = weaponSkill?.cooldown ?? 0;
-  const weaponState = getCooldownState(player.weaponSkillReadyAt, weaponCooldown, now);
-  weaponFill.style.width = `${(weaponState.progress * 100).toFixed(1)}%`;
-  weaponText.textContent = weaponState.remaining > 0
-    ? `武器: ${weaponState.remaining.toFixed(1)}s`
-    : "武器: 就绪";
+  if (weaponSkill?.type === "kunpeng-dust") {
+    const dustCount = player.kunpengDusts?.length ?? 0;
+    const maxDust = weaponSkill.maxOrbiting ?? 20;
+    const fillRatio = clamp(dustCount / Math.max(1, maxDust), 0, 1);
+    weaponFill.style.width = `${(fillRatio * 100).toFixed(1)}%`;
+    if (dustCount >= maxDust) {
+      weaponText.textContent = `武器: 尘 ${dustCount}/${maxDust}`;
+    } else {
+      const remaining = Math.max(0, (player.nextKunpengDustAt ?? now) - now);
+      weaponText.textContent = `武器: 尘 ${dustCount}/${maxDust} | 下枚 ${remaining.toFixed(1)}s`;
+    }
+  } else {
+    const weaponCooldown = weaponSkill?.cooldown ?? 0;
+    const weaponState = getCooldownState(player.weaponSkillReadyAt, weaponCooldown, now);
+    weaponFill.style.width = `${(weaponState.progress * 100).toFixed(1)}%`;
+    weaponText.textContent = weaponState.remaining > 0
+      ? `武器: ${weaponState.remaining.toFixed(1)}s`
+      : "武器: 就绪";
+  }
 
   const characterSkill = getCharacterSkillConfig(player);
   if (!characterSkill) {
@@ -1831,6 +2042,19 @@ function updatePlayerSkillHud(player, weaponFill, weaponText, characterFill, cha
   characterText.textContent = characterState.remaining > 0
     ? `角色: ${characterState.remaining.toFixed(1)}s`
     : "角色: 就绪";
+}
+
+function updatePlayerDashHud(player, dashFill, dashText) {
+  const now = game.now;
+  const maxCharges = player.dashChargeMax ?? GAME_DATA.tuning.dashChargeMax ?? 3;
+  const currentCharges = clamp(player.dashCharges ?? maxCharges, 0, maxCharges);
+  dashFill.style.width = `${(currentCharges / Math.max(1, maxCharges) * 100).toFixed(1)}%`;
+  if (currentCharges >= maxCharges || !(player.dashChargeNextAt > now)) {
+    dashText.textContent = `闪能: ${currentCharges}/${maxCharges}`;
+    return;
+  }
+  const remaining = Math.max(0, player.dashChargeNextAt - now);
+  dashText.textContent = `闪能: ${currentCharges}/${maxCharges} | 回复 ${remaining.toFixed(1)}s`;
 }
 
 function getCooldownState(readyAt, cooldown, now) {
@@ -2104,6 +2328,9 @@ function preparePlayerForBattle(player) {
   player.jumpCount = 0;
   player.dashDamageMultiplier = player.character?.dashDamageMultiplier ?? 1;
   player.dashKnockbackMultiplier = player.character?.dashKnockbackMultiplier ?? 1;
+  player.dashChargeMax = GAME_DATA.tuning.dashChargeMax ?? 3;
+  player.dashCharges = player.dashChargeMax;
+  player.dashChargeNextAt = 0;
   player.speedBuffUntil = 0;
   player.speedDebuffUntil = 0;
   player.bindUntil = 0;
@@ -2123,6 +2350,11 @@ function preparePlayerForBattle(player) {
   player.dashRecoveryPending = false;
   player.dashHitMarks.clear();
   player.dashCooldownUntil = 0;
+  player.kunpengDusts = [];
+  const weaponSkill = player.weapon?.skill ?? player.weapon?.bullet;
+  player.nextKunpengDustAt = weaponSkill?.type === "kunpeng-dust"
+    ? game.now + (weaponSkill.generationInterval ?? 4)
+    : 0;
   player.windMark = null;
   player.chiyanCharge.active = false;
   player.chiyanCharge.startedAt = 0;
@@ -2225,6 +2457,10 @@ function resetToStart() {
   p2.dashRecoveryPending = false;
   p1.dashHitMarks.clear();
   p2.dashHitMarks.clear();
+  p1.kunpengDusts = [];
+  p2.kunpengDusts = [];
+  p1.nextKunpengDustAt = 0;
+  p2.nextKunpengDustAt = 0;
   p1.stunnedUntil = 0;
   p2.stunnedUntil = 0;
   p1.maxHp = GAME_DATA.tuning.maxHp;
@@ -2239,6 +2475,12 @@ function resetToStart() {
   p2.dashDamageMultiplier = 1;
   p1.dashKnockbackMultiplier = 1;
   p2.dashKnockbackMultiplier = 1;
+  p1.dashChargeMax = GAME_DATA.tuning.dashChargeMax ?? 3;
+  p2.dashChargeMax = GAME_DATA.tuning.dashChargeMax ?? 3;
+  p1.dashCharges = p1.dashChargeMax;
+  p2.dashCharges = p2.dashChargeMax;
+  p1.dashChargeNextAt = 0;
+  p2.dashChargeNextAt = 0;
   p1.speedBuffUntil = 0;
   p2.speedBuffUntil = 0;
   p1.speedDebuffUntil = 0;
@@ -2320,6 +2562,7 @@ function render(now) {
   for (const projectile of game.projectiles) {
     drawProjectile(projectile);
   }
+  drawKunpengDusts(now);
   drawWebZones(now);
   drawPlayer(game.players[0], now);
   drawPlayer(game.players[1], now);
@@ -2433,6 +2676,26 @@ function drawWindMarks(now) {
     ctx.restore();
 
     ctx.restore();
+  }
+}
+
+function drawKunpengDusts(now) {
+  void now;
+  for (const player of game.players) {
+    if (!player.kunpengDusts || player.kunpengDusts.length === 0) {
+      continue;
+    }
+    for (const dust of player.kunpengDusts) {
+      drawProjectile({
+        x: dust.x,
+        y: dust.y,
+        radius: dust.radius ?? 11,
+        icon: player.weapon?.icon,
+        spin: 0,
+        spinSpeed: 0,
+        sourceType: "player"
+      });
+    }
   }
 }
 
