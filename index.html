@@ -59,6 +59,9 @@
     <button id="startMenuButton" class="start-menu-button" type="button" aria-label="开始菜单">⋯</button>
     <div id="startMenuPanel" class="start-menu-panel hidden">
       <button id="showBagButton" class="start-menu-item" type="button">背包</button>
+      <button id="showConstellationButton" class="start-menu-item" type="button">角色命座</button>
+      <button id="showGachaButton" class="start-menu-item" type="button">抽卡</button>
+      <button id="showShopButton" class="start-menu-item" type="button">充值商店</button>
       <button id="showAuthorsButton" class="start-menu-item" type="button">查看作者</button>
       <button id="showDonateButton" class="start-menu-item" type="button">打赏支持</button>
     </div>
@@ -66,7 +69,7 @@
     <section id="authOverlay" class="auth-overlay">
       <article class="auth-card">
         <h2 id="authTitle">账号登录</h2>
-        <p id="authSubtitle" class="auth-subtitle">请先登录或注册账号。账号存档保存在本地 Cookie 中。</p>
+        <p id="authSubtitle" class="auth-subtitle">请先登录或注册账号。账号存档保存在当前浏览器本地。</p>
         <div class="auth-mode-row">
           <button id="authLoginTab" class="auth-mode-button active" type="button">登录</button>
           <button id="authRegisterTab" class="auth-mode-button" type="button">注册</button>
@@ -90,10 +93,13 @@
 
     <section id="startOverlay" class="start-overlay hidden">
       <article class="start-overlay-card">
-        <h3 id="startOverlayTitle">信息</h3>
+        <div class="start-overlay-header">
+          <h3 id="startOverlayTitle">信息</h3>
+          <button id="startOverlayClose" class="overlay-close-button" type="button">关闭</button>
+        </div>
         <div id="startOverlayText" class="start-overlay-text"></div>
         <img id="startOverlayImage" class="start-overlay-image hidden" alt="打赏二维码">
-        <button id="startOverlayClose" class="confirm-button" type="button">关闭</button>
+        <div id="startOverlayContent" class="start-overlay-content hidden"></div>
       </article>
     </section>
 
