@@ -129,11 +129,23 @@ body {
 }
 
 .start-overlay-card {
-  width: min(520px, 86%);
+  width: min(860px, 92%);
+  max-height: 86%;
   border-radius: 14px;
   border: 1px solid rgba(186, 219, 237, 0.34);
   background: linear-gradient(140deg, rgba(11, 22, 31, 0.94), rgba(8, 17, 24, 0.94));
   padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: hidden;
+}
+
+.start-overlay-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
 }
 
 .start-overlay-card h3 {
@@ -142,7 +154,6 @@ body {
 }
 
 .start-overlay-text {
-  margin-top: 10px;
   line-height: 1.6;
   color: #d6e7f1;
   font-size: 14px;
@@ -154,6 +165,323 @@ body {
   border-radius: 10px;
   border: 1px solid rgba(209, 231, 243, 0.22);
   display: block;
+}
+
+.overlay-close-button {
+  border: 1px solid rgba(190, 223, 240, 0.32);
+  background: rgba(11, 21, 30, 0.72);
+  color: #e8f4fb;
+  font-size: 13px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.overlay-close-button:hover {
+  filter: brightness(1.08);
+}
+
+.start-overlay-content {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  display: grid;
+  gap: 14px;
+}
+
+.auth-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 14;
+  display: grid;
+  place-items: center;
+  background: rgba(3, 8, 14, 0.72);
+  backdrop-filter: blur(5px);
+}
+
+.auth-card {
+  width: min(420px, 88%);
+  border-radius: 16px;
+  border: 1px solid rgba(187, 220, 238, 0.32);
+  background: linear-gradient(145deg, rgba(12, 22, 32, 0.96), rgba(6, 15, 24, 0.96));
+  box-shadow: var(--shadow);
+  padding: 20px;
+}
+
+.auth-card h2 {
+  margin: 0;
+  font-size: 26px;
+}
+
+.auth-subtitle {
+  margin: 8px 0 0;
+  color: var(--text-soft);
+  line-height: 1.55;
+  font-size: 13px;
+}
+
+.auth-mode-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.auth-mode-button {
+  border: 1px solid rgba(171, 214, 234, 0.24);
+  background: rgba(18, 30, 40, 0.72);
+  color: #d6e9f3;
+  border-radius: 10px;
+  padding: 10px 12px;
+  cursor: pointer;
+}
+
+.auth-mode-button.active {
+  border-color: rgba(130, 221, 255, 0.74);
+  background: rgba(31, 91, 117, 0.42);
+  color: #effbff;
+}
+
+.auth-field {
+  margin-top: 12px;
+  display: grid;
+  gap: 6px;
+}
+
+.auth-field span {
+  color: #d8e9f4;
+  font-size: 13px;
+}
+
+.auth-input,
+.mini-input {
+  width: 100%;
+  border-radius: 10px;
+  border: 1px solid rgba(179, 214, 232, 0.24);
+  background: rgba(7, 16, 24, 0.82);
+  color: #eff8ff;
+  padding: 10px 12px;
+  font-size: 14px;
+}
+
+.auth-message,
+.muted-text {
+  margin: 12px 0 0;
+  color: #b7cfdf;
+  line-height: 1.55;
+  font-size: 13px;
+}
+
+.profile-banner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(187, 220, 238, 0.2);
+  background: rgba(8, 17, 25, 0.58);
+}
+
+.profile-banner strong {
+  display: block;
+  font-size: 18px;
+}
+
+.profile-banner span {
+  color: #b9d0de;
+  font-size: 13px;
+}
+
+.overlay-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.overlay-tab,
+.secondary-button,
+.danger-button {
+  border: 1px solid rgba(185, 219, 237, 0.24);
+  background: rgba(16, 27, 38, 0.7);
+  color: #deeff9;
+  font-size: 13px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.overlay-tab.active {
+  border-color: rgba(130, 221, 255, 0.74);
+  background: rgba(31, 91, 117, 0.42);
+  color: #effbff;
+}
+
+.secondary-button:hover,
+.danger-button:hover,
+.overlay-tab:hover {
+  filter: brightness(1.08);
+}
+
+.danger-button {
+  border-color: rgba(255, 162, 162, 0.28);
+  color: #ffe0e0;
+}
+
+.resource-grid,
+.shop-grid,
+.gacha-result-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+}
+
+.resource-card,
+.shop-card,
+.constellation-card,
+.account-section,
+.featured-card,
+.gacha-summary-card {
+  border-radius: 12px;
+  border: 1px solid rgba(188, 221, 238, 0.2);
+  background: rgba(5, 14, 22, 0.52);
+  padding: 12px 14px;
+}
+
+.resource-label,
+.shop-price,
+.pill-text {
+  color: #9fb7c9;
+  font-size: 12px;
+}
+
+.resource-value {
+  margin-top: 6px;
+  color: #f2fbff;
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.account-section h4,
+.featured-card h4,
+.gacha-summary-card h4,
+.constellation-card h4 {
+  margin: 0 0 10px;
+  font-size: 17px;
+}
+
+.inventory-list,
+.detail-list {
+  margin: 0;
+  padding-left: 18px;
+  color: #c3d8e6;
+  line-height: 1.55;
+  font-size: 13px;
+}
+
+.constellation-list {
+  display: grid;
+  gap: 8px;
+}
+
+.inline-actions,
+.form-inline,
+.gacha-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.form-inline .mini-input {
+  max-width: 240px;
+}
+
+.two-column {
+  display: grid;
+  grid-template-columns: 1.2fr 0.8fr;
+  gap: 12px;
+}
+
+.constellation-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.constellation-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  color: #cde3ee;
+  font-size: 13px;
+}
+
+.constellation-item {
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(183, 215, 233, 0.14);
+  background: rgba(13, 24, 35, 0.58);
+}
+
+.constellation-item.active {
+  border-color: rgba(120, 223, 167, 0.34);
+  background: rgba(21, 64, 47, 0.34);
+}
+
+.constellation-item.locked {
+  opacity: 0.62;
+}
+
+.constellation-item strong {
+  display: block;
+  margin-bottom: 4px;
+  color: #edfaff;
+  font-size: 13px;
+}
+
+.constellation-item span {
+  color: #bdd4e2;
+  line-height: 1.5;
+  font-size: 12px;
+}
+
+.featured-card p,
+.gacha-summary-card p,
+.shop-card p,
+.constellation-card p {
+  margin: 6px 0 0;
+  color: #d2e6f2;
+  line-height: 1.55;
+  font-size: 13px;
+}
+
+.shop-card .confirm-button,
+.gacha-actions .confirm-button {
+  margin-top: 10px;
+}
+
+.result-chip {
+  border-radius: 10px;
+  border: 1px solid rgba(189, 221, 238, 0.18);
+  background: rgba(12, 23, 32, 0.64);
+  padding: 10px 12px;
+}
+
+.result-chip strong {
+  display: block;
+  color: #ecfbff;
+  font-size: 14px;
+}
+
+.result-chip span {
+  display: block;
+  margin-top: 4px;
+  color: #c4d9e7;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .phase-banner {
@@ -662,5 +990,19 @@ body {
 
   .selection-wheel {
     min-height: 240px;
+  }
+
+  .start-overlay-card,
+  .auth-card {
+    width: min(96%, 96%);
+  }
+
+  .two-column {
+    grid-template-columns: 1fr;
+  }
+
+  .profile-banner {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }

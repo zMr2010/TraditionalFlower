@@ -19,12 +19,28 @@ const ui = {
   startHint: document.getElementById("startHint"),
   startMenuButton: document.getElementById("startMenuButton"),
   startMenuPanel: document.getElementById("startMenuPanel"),
+  showBagButton: document.getElementById("showBagButton"),
+  showConstellationButton: document.getElementById("showConstellationButton"),
+  showGachaButton: document.getElementById("showGachaButton"),
+  showShopButton: document.getElementById("showShopButton"),
   showAuthorsButton: document.getElementById("showAuthorsButton"),
   showDonateButton: document.getElementById("showDonateButton"),
+  authOverlay: document.getElementById("authOverlay"),
+  authTitle: document.getElementById("authTitle"),
+  authSubtitle: document.getElementById("authSubtitle"),
+  authLoginTab: document.getElementById("authLoginTab"),
+  authRegisterTab: document.getElementById("authRegisterTab"),
+  authUsername: document.getElementById("authUsername"),
+  authPassword: document.getElementById("authPassword"),
+  authConfirmRow: document.getElementById("authConfirmRow"),
+  authConfirmPassword: document.getElementById("authConfirmPassword"),
+  authMessage: document.getElementById("authMessage"),
+  authSubmit: document.getElementById("authSubmit"),
   startOverlay: document.getElementById("startOverlay"),
   startOverlayTitle: document.getElementById("startOverlayTitle"),
   startOverlayText: document.getElementById("startOverlayText"),
   startOverlayImage: document.getElementById("startOverlayImage"),
+  startOverlayContent: document.getElementById("startOverlayContent"),
   startOverlayClose: document.getElementById("startOverlayClose"),
   phaseBanner: document.getElementById("phaseBanner"),
   hud: document.getElementById("hud"),
@@ -101,6 +117,7 @@ const game = {
   webZones: [],
   sandstorms: [],
   fireCurtains: [],
+  healingTotems: [],
   boss: null,
   selection: {
     flow: [],
@@ -111,6 +128,16 @@ const game = {
   result: {
     title: "",
     description: ""
+  },
+  account: {
+    db: null,
+    username: "",
+    profile: null,
+    authMode: "login",
+    overlayTab: "bag",
+    overlayMessage: "",
+    currentBannerKey: "",
+    lastDateKey: ""
   }
 };
 
@@ -137,6 +164,59 @@ const RANDOM_WEAPON_OPTION = {
 const AUTHOR_NAMES = ["Zhoumoubo", "仙蕊缀锦", "ChatGPT", "Mario"];
 const DONATE_IMAGE_PATH = "Images/Money/WeChat.jpg";
 const NEGATIVE_LAYER_CAP = 5;
+const STORAGE_KEY = "tradition-flower-save-v2";
+const STORAGE_USER_KEY = "tradition-flower-current-user";
+const TOPUP_TEST_PASSWORD = "abcdefghijklmnopqrstuvwxyz1234567890";
+const GACHA_CHARACTER_RATE = 0.006;
+const GACHA_80TH_RATE = 0.03;
+const GACHA_PITY_MAX = 120;
+const VULNERABLE_DURATION = 5;
+const HEALING_TOTEM_RADIUS = 122;
+const HEALING_TOTEM_DURATION = 5;
+const HEALING_TOTEM_TICK = 1;
+const RECHARGE_OPTIONS = [
+  { amountCny: 6, prototypes: 60 },
+  { amountCny: 30, prototypes: 300 },
+  { amountCny: 98, prototypes: 980 },
+  { amountCny: 198, prototypes: 1980 },
+  { amountCny: 328, prototypes: 3280 },
+  { amountCny: 648, prototypes: 6480 }
+];
+const CONSTELLATION_DATA = {
+  "qing-lan": [
+    "技能冷却 -1s",
+    "移速 +2%",
+    "放下风印后可立即再次使用技能进行传送",
+    "风印传送伤害提升至 5",
+    "风印传送命中时附加 1s 眩晕与易伤",
+    "风印传送后刷新技能冷却，每 15s 最多触发 1 次"
+  ],
+  "shadow-ninja": [
+    "隐身时间 +1s",
+    "隐身期间移速 +5%",
+    "血量上限提升至 100",
+    "冲刺伤害提升至 6",
+    "进入隐身时回复 3 点闪能",
+    "满足条件时触发完美隐身：眩晕敌人并解锁强化突进"
+  ],
+  "chi-yan": [
+    "移速 +2%",
+    "蓄力时间 -1s",
+    "火幕命中敌人时立刻刷新技能冷却",
+    "蓄力时间 +2s",
+    "蓄力期间可移动",
+    "蓄力不再因击退累计而中断"
+  ],
+  "ling-mu": [
+    "移速 +2%",
+    "每 10s 触发一次：造成伤害时随机回复 0~10 点生命",
+    "血量上限 +5",
+    "移速再 +1%，受伤后随机回复 0~5 点生命",
+    "移速 -4%",
+    "复活次数 +1，触发复活后留下治疗图腾"
+  ]
+};
+const CHARACTER_NAME_BY_ID = Object.fromEntries(GAME_DATA.characters.map((character) => [character.id, character.name]));
 
 function createPortals() {
   const y = HEIGHT * 0.54;
@@ -183,6 +263,7 @@ function createPlayer(side, x) {
     hp: tuning.maxHp,
     maxHp: tuning.maxHp,
     baseMoveSpeedMultiplier: 1,
+    staticMoveMultiplier: 1,
     speedBuffUntil: 0,
     speedDebuffUntil: 0,
     bindUntil: 0,
@@ -197,6 +278,7 @@ function createPlayer(side, x) {
     jumpCount: 0,
     dashDamageMultiplier: 1,
     dashKnockbackMultiplier: 1,
+    dashDamageOverride: null,
     dashCharges: GAME_DATA.tuning.dashChargeMax ?? 3,
     dashChargeMax: GAME_DATA.tuning.dashChargeMax ?? 3,
     dashChargeNextAt: 0,
@@ -218,7 +300,15 @@ function createPlayer(side, x) {
       breakAccum: 0
     },
     lingmuReviveUsed: false,
+    lingmuRevivesRemaining: 1,
+    lingmuLifeBurstReadyAt: 0,
     invisibleUntil: 0,
+    shadowPerfectStrikeReady: false,
+    qinglanCooldownResetReadyAt: 0,
+    characterConstellationLevel: 0,
+    vulnerableUntil: 0,
+    vulnerableBonus: 0,
+    runtimeCharacterSkill: null,
     portalTouch: null,
     portalPhase: Math.random() * Math.PI * 2,
     character: GAME_DATA.characters[0],
@@ -300,11 +390,892 @@ function getImage(src) {
   return imageBank.get(src) ?? null;
 }
 
+function getLocalDateKey(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function getBannerIndexForKey(dateKey) {
+  const [year, month, day] = String(dateKey || getLocalDateKey())
+    .split("-")
+    .map((value) => Number(value) || 0);
+  const currentDate = new Date(year, Math.max(0, month - 1), Math.max(1, day));
+  const epoch = new Date(2026, 0, 1);
+  const days = Math.floor((currentDate - epoch) / 86400000);
+  const total = GAME_DATA.characters.length || 1;
+  return ((days % total) + total) % total;
+}
+
+function getBannerCharacterByKey(dateKey = getLocalDateKey()) {
+  return GAME_DATA.characters[getBannerIndexForKey(dateKey)] ?? GAME_DATA.characters[0];
+}
+
+function createEmptyAccountDb() {
+  return {
+    version: 2,
+    accounts: {}
+  };
+}
+
+function createDefaultProfile() {
+  const characters = {};
+  for (const character of GAME_DATA.characters) {
+    characters[character.id] = {
+      obtained: 0,
+      active: 0
+    };
+  }
+  return {
+    version: 2,
+    createdAt: Date.now(),
+    resources: {
+      shards: 0,
+      flowers: 0,
+      greatFlowers: 0,
+      prototypes: 0
+    },
+    inventory: {
+      residue: 0,
+      urgentDraft: 0,
+      lastingDraft: 0,
+      vouchers: 0
+    },
+    characters,
+    gacha: {
+      cyclePulls: 0,
+      freeTenPulls: 0,
+      urgentGranted: false,
+      lastingGranted: false,
+      bannerKey: "",
+      history: [],
+      lastResults: []
+    },
+    shop: {
+      firstTopUpDouble: true
+    },
+    messages: []
+  };
+}
+
+function normalizeProfile(profile) {
+  const base = createDefaultProfile();
+  const next = {
+    ...base,
+    ...(profile ?? {}),
+    resources: {
+      ...base.resources,
+      ...(profile?.resources ?? {})
+    },
+    inventory: {
+      ...base.inventory,
+      ...(profile?.inventory ?? {})
+    },
+    gacha: {
+      ...base.gacha,
+      ...(profile?.gacha ?? {})
+    },
+    shop: {
+      ...base.shop,
+      ...(profile?.shop ?? {})
+    },
+    messages: Array.isArray(profile?.messages) ? profile.messages.slice(-18) : []
+  };
+
+  next.characters = {};
+  for (const character of GAME_DATA.characters) {
+    const saved = profile?.characters?.[character.id] ?? {};
+    const obtained = clamp(Math.round(saved.obtained ?? 0), 0, 6);
+    next.characters[character.id] = {
+      obtained,
+      active: clamp(Math.round(saved.active ?? 0), 0, obtained)
+    };
+  }
+
+  next.gacha.cyclePulls = clamp(Math.round(next.gacha.cyclePulls ?? 0), 0, GACHA_PITY_MAX);
+  next.gacha.freeTenPulls = Math.max(0, Math.round(next.gacha.freeTenPulls ?? 0));
+  next.gacha.history = Array.isArray(profile?.gacha?.history) ? profile.gacha.history.slice(-30) : [];
+  next.gacha.lastResults = Array.isArray(profile?.gacha?.lastResults) ? profile.gacha.lastResults.slice(-10) : [];
+  next.inventory.vouchers = Math.max(0, Math.round(next.inventory.vouchers ?? 0));
+  next.inventory.residue = Math.max(0, Math.round(next.inventory.residue ?? 0));
+  next.inventory.urgentDraft = Math.max(0, Math.round(next.inventory.urgentDraft ?? 0));
+  next.inventory.lastingDraft = Math.max(0, Math.round(next.inventory.lastingDraft ?? 0));
+  next.resources.shards = Math.max(0, Math.round(next.resources.shards ?? 0));
+  next.resources.flowers = Math.max(0, Math.round(next.resources.flowers ?? 0));
+  next.resources.greatFlowers = Math.max(0, Math.round(next.resources.greatFlowers ?? 0));
+  next.resources.prototypes = Math.max(0, Math.round(next.resources.prototypes ?? 0));
+  return next;
+}
+
+function loadAccountDb() {
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) {
+      return createEmptyAccountDb();
+    }
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") {
+      return createEmptyAccountDb();
+    }
+    return {
+      version: 2,
+      accounts: parsed.accounts ?? {}
+    };
+  } catch (error) {
+    console.warn("读取账号存档失败，已回退为空存档。", error);
+    return createEmptyAccountDb();
+  }
+}
+
+function persistAccountDb() {
+  if (!game.account.db) {
+    return;
+  }
+  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(game.account.db));
+  if (game.account.username) {
+    window.localStorage.setItem(STORAGE_USER_KEY, game.account.username);
+  } else {
+    window.localStorage.removeItem(STORAGE_USER_KEY);
+  }
+}
+
+function isSignedIn() {
+  return Boolean(game.account.username && game.account.profile);
+}
+
+function getProfile() {
+  return game.account.profile;
+}
+
+function saveCurrentProfile() {
+  if (!isSignedIn() || !game.account.db?.accounts?.[game.account.username]) {
+    return;
+  }
+  game.account.profile = normalizeProfile(game.account.profile);
+  game.account.db.accounts[game.account.username].profile = game.account.profile;
+  persistAccountDb();
+}
+
+function getCharacterProgress(characterId) {
+  const profile = getProfile();
+  if (!profile) {
+    return { obtained: 0, active: 0 };
+  }
+  return profile.characters?.[characterId] ?? { obtained: 0, active: 0 };
+}
+
+function getObtainedConstellationLevel(characterId) {
+  return clamp(getCharacterProgress(characterId).obtained ?? 0, 0, 6);
+}
+
+function getActiveConstellationLevel(characterId) {
+  return clamp(getCharacterProgress(characterId).active ?? 0, 0, 6);
+}
+
+function setOverlayMessage(text = "") {
+  game.account.overlayMessage = String(text || "");
+}
+
+function pushProfileMessage(text) {
+  const profile = getProfile();
+  if (!profile) {
+    return;
+  }
+  profile.messages = Array.isArray(profile.messages) ? profile.messages : [];
+  profile.messages.unshift({
+    id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    text: String(text),
+    createdAt: Date.now()
+  });
+  profile.messages = profile.messages.slice(0, 18);
+}
+
+function syncProfileDailyState() {
+  if (!isSignedIn()) {
+    return;
+  }
+  const todayKey = getLocalDateKey();
+  if (game.account.lastDateKey === todayKey) {
+    return;
+  }
+  game.account.lastDateKey = todayKey;
+  game.account.currentBannerKey = todayKey;
+
+  const profile = getProfile();
+  if (profile.gacha.bannerKey && profile.gacha.bannerKey !== todayKey && profile.inventory.vouchers > 0) {
+    const converted = profile.inventory.vouchers * 10;
+    profile.resources.greatFlowers += converted;
+    pushProfileMessage(`卡池已在 ${todayKey} 刷新，自动兑换 ${converted} 巨大文花。`);
+    profile.inventory.vouchers = 0;
+  }
+  profile.gacha.bannerKey = todayKey;
+  saveCurrentProfile();
+}
+
+function setAuthMode(mode) {
+  game.account.authMode = mode === "register" ? "register" : "login";
+  const isRegister = game.account.authMode === "register";
+  ui.authLoginTab.classList.toggle("active", !isRegister);
+  ui.authRegisterTab.classList.toggle("active", isRegister);
+  ui.authConfirmRow.classList.toggle("hidden", !isRegister);
+  ui.authTitle.textContent = isRegister ? "注册账号" : "账号登录";
+  ui.authSubmit.textContent = isRegister ? "注册" : "登录";
+  ui.authPassword.autocomplete = isRegister ? "new-password" : "current-password";
+}
+
+function showAuthMessage(text, isError = false) {
+  ui.authMessage.textContent = text;
+  ui.authMessage.style.color = isError ? "#ffd1d1" : "#b7cfdf";
+}
+
+function showAuthOverlay(mode = "login", message = "") {
+  setAuthMode(mode);
+  ui.authOverlay.classList.remove("hidden");
+  setStartMenuVisible(false);
+  ui.authPassword.value = "";
+  ui.authConfirmPassword.value = "";
+  const fallback = mode === "register" ? "请输入账号并完成注册。" : "请输入账号密码登录。";
+  showAuthMessage(message || fallback, false);
+}
+
+function hideAuthOverlay() {
+  ui.authOverlay.classList.add("hidden");
+  clearInputState();
+}
+
+function activateAccount(username, { silent = false } = {}) {
+  const entry = game.account.db?.accounts?.[username];
+  if (!entry) {
+    return false;
+  }
+  game.account.username = username;
+  game.account.profile = normalizeProfile(entry.profile);
+  game.account.db.accounts[username].profile = game.account.profile;
+  syncProfileDailyState();
+  persistAccountDb();
+  hideAuthOverlay();
+  if (game.phase === PHASE.START) {
+    setStartMenuVisible(true);
+  }
+  if (!silent) {
+    setOverlayMessage(`欢迎回来，${username}。`);
+  }
+  return true;
+}
+
+function logoutAccount() {
+  game.account.username = "";
+  game.account.profile = null;
+  game.account.currentBannerKey = "";
+  game.account.lastDateKey = "";
+  setOverlayMessage("");
+  persistAccountDb();
+  closeStartOverlay();
+  showAuthOverlay("login", "已退出账号，请重新登录。");
+}
+
+function initializeAccountState() {
+  game.account.db = loadAccountDb();
+  const rememberedUser = window.localStorage.getItem(STORAGE_USER_KEY);
+  if (rememberedUser && game.account.db.accounts?.[rememberedUser]) {
+    activateAccount(rememberedUser, { silent: true });
+    return;
+  }
+  showAuthOverlay("register", "首次进入请注册一个新账号。");
+}
+
+function handleAuthSubmit() {
+  const username = String(ui.authUsername.value || "").trim();
+  const password = String(ui.authPassword.value || "").trim();
+  const confirmPassword = String(ui.authConfirmPassword.value || "").trim();
+  if (!username || username.length < 2) {
+    showAuthMessage("账号至少需要 2 个字符。", true);
+    return;
+  }
+  if (!password || password.length < 4) {
+    showAuthMessage("密码至少需要 4 个字符。", true);
+    return;
+  }
+
+  if (game.account.authMode === "register") {
+    if (password !== confirmPassword) {
+      showAuthMessage("两次输入的密码不一致。", true);
+      return;
+    }
+    if (game.account.db.accounts?.[username]) {
+      showAuthMessage("该账号已存在，请直接登录。", true);
+      return;
+    }
+    game.account.db.accounts[username] = {
+      password,
+      profile: createDefaultProfile()
+    };
+    activateAccount(username);
+    showAuthMessage("注册成功。");
+    return;
+  }
+
+  const entry = game.account.db.accounts?.[username];
+  if (!entry || entry.password !== password) {
+    showAuthMessage("账号或密码错误。", true);
+    return;
+  }
+  activateAccount(username);
+}
+
+function resetStartOverlayBody() {
+  ui.startOverlayText.innerHTML = "";
+  ui.startOverlayText.classList.add("hidden");
+  ui.startOverlayImage.classList.add("hidden");
+  ui.startOverlayImage.removeAttribute("src");
+  ui.startOverlayContent.innerHTML = "";
+  ui.startOverlayContent.classList.add("hidden");
+}
+
+function showSimpleStartOverlay(title, textHtml, imageSrc = "") {
+  resetStartOverlayBody();
+  ui.startOverlayTitle.textContent = title;
+  ui.startOverlayText.innerHTML = textHtml;
+  ui.startOverlayText.classList.remove("hidden");
+  if (imageSrc) {
+    ui.startOverlayImage.src = imageSrc;
+    ui.startOverlayImage.classList.remove("hidden");
+  }
+  ui.startOverlay.classList.remove("hidden");
+}
+
+function showRichStartOverlay(title, contentHtml) {
+  resetStartOverlayBody();
+  ui.startOverlayTitle.textContent = title;
+  ui.startOverlayContent.innerHTML = contentHtml;
+  ui.startOverlayContent.classList.remove("hidden");
+  ui.startOverlay.classList.remove("hidden");
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll("\"", "&quot;");
+}
+
+function buildOverlayTabsHtml(activeTab) {
+  const tabs = [
+    { id: "bag", label: "背包" },
+    { id: "constellation", label: "角色命座" },
+    { id: "gacha", label: "抽卡" },
+    { id: "shop", label: "充值商店" }
+  ];
+  return `
+    <div class="overlay-tabs">
+      ${tabs
+        .map((tab) => `
+          <button
+            class="overlay-tab${tab.id === activeTab ? " active" : ""}"
+            type="button"
+            data-action="switch-tab"
+            data-tab="${tab.id}"
+          >${tab.label}</button>
+        `)
+        .join("")}
+    </div>
+  `;
+}
+
+function renderProfileBannerHtml() {
+  const bannerKey = game.account.currentBannerKey || getLocalDateKey();
+  const featured = getBannerCharacterByKey(bannerKey);
+  return `
+    <div class="profile-banner">
+      <div>
+        <strong>${escapeHtml(game.account.username || "未登录")}</strong>
+        <span>今日卡池：${escapeHtml(featured.name)} · ${escapeHtml(bannerKey)}</span>
+      </div>
+      <div class="inline-actions">
+        <button class="secondary-button" type="button" data-action="switch-tab" data-tab="bag">查看资源</button>
+        <button class="danger-button" type="button" data-action="logout">退出账号</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderOverlayMessageHtml() {
+  if (!game.account.overlayMessage) {
+    return "";
+  }
+  return `<div class="account-section"><p>${escapeHtml(game.account.overlayMessage)}</p></div>`;
+}
+
+function renderBagTabHtml() {
+  const profile = getProfile();
+  const messages = Array.isArray(profile.messages) ? profile.messages.slice(0, 4) : [];
+  return `
+    ${renderProfileBannerHtml()}
+    ${buildOverlayTabsHtml("bag")}
+    ${renderOverlayMessageHtml()}
+    <div class="resource-grid">
+      <div class="resource-card"><div class="resource-label">文花碎片</div><div class="resource-value">${profile.resources.shards}</div></div>
+      <div class="resource-card"><div class="resource-label">文花</div><div class="resource-value">${profile.resources.flowers}</div></div>
+      <div class="resource-card"><div class="resource-label">巨大文花</div><div class="resource-value">${profile.resources.greatFlowers}</div></div>
+      <div class="resource-card"><div class="resource-label">文花雏形</div><div class="resource-value">${profile.resources.prototypes}</div></div>
+    </div>
+    <div class="two-column">
+      <section class="account-section">
+        <h4>背包物品</h4>
+        <ul class="inventory-list">
+          <li>糟粕：${profile.inventory.residue}</li>
+          <li>加急撰写：${profile.inventory.urgentDraft}</li>
+          <li>持续撰写：${profile.inventory.lastingDraft}</li>
+          <li>文花凭证：${profile.inventory.vouchers}</li>
+        </ul>
+        <p class="muted-text">重复获得已满命角色时，会自动转化为 5 文花。</p>
+      </section>
+      <section class="account-section">
+        <h4>资源兑换</h4>
+        <div class="inline-actions">
+          <button class="confirm-button" type="button" data-action="convert-prototypes">雏形 -> 碎片</button>
+          <button class="confirm-button" type="button" data-action="convert-shards">150 碎片 -> 1 巨大文花</button>
+          <button class="confirm-button" type="button" data-action="convert-flowers">2 文花 -> 1 巨大文花</button>
+        </div>
+        <p class="muted-text">兑换按可用数量批量执行，方便快速测试。</p>
+      </section>
+    </div>
+    <section class="account-section">
+      <h4>最近消息</h4>
+      ${messages.length > 0
+        ? `<ul class="detail-list">${messages.map((item) => `<li>${escapeHtml(item.text)}</li>`).join("")}</ul>`
+        : `<p class="muted-text">暂无消息。</p>`}
+    </section>
+  `;
+}
+
+function renderConstellationTabHtml() {
+  const cards = GAME_DATA.characters
+    .map((character) => {
+      const progress = getCharacterProgress(character.id);
+      const lines = CONSTELLATION_DATA[character.id] ?? [];
+      return `
+        <section class="constellation-card">
+          <h4>${escapeHtml(character.name)}</h4>
+          <div class="constellation-meta">
+            <span>已获得：${progress.obtained} / 6</span>
+            <span>当前生效：${progress.active} 命</span>
+          </div>
+          <div class="inline-actions">
+            <button class="confirm-button" type="button" data-action="set-constellation" data-character="${character.id}" data-level="${Math.min(progress.obtained, progress.active + 1)}">激活下一命</button>
+            <button class="secondary-button" type="button" data-action="set-constellation" data-character="${character.id}" data-level="${Math.max(0, progress.active - 1)}">取消一命</button>
+            <button class="secondary-button" type="button" data-action="set-constellation" data-character="${character.id}" data-level="0">全部关闭</button>
+          </div>
+          <div class="constellation-list">
+            ${lines
+              .map((line, index) => {
+                const level = index + 1;
+                let stateClass = "locked";
+                if (level <= progress.active) {
+                  stateClass = "active";
+                } else if (level <= progress.obtained) {
+                  stateClass = "";
+                }
+                return `
+                  <div class="constellation-item ${stateClass}">
+                    <strong>${level} 命</strong>
+                    <span>${escapeHtml(line)}</span>
+                  </div>
+                `;
+              })
+              .join("")}
+          </div>
+        </section>
+      `;
+    })
+    .join("");
+  return `
+    ${renderProfileBannerHtml()}
+    ${buildOverlayTabsHtml("constellation")}
+    ${renderOverlayMessageHtml()}
+    <div class="constellation-grid">${cards}</div>
+    <section class="account-section">
+      <h4>说明</h4>
+      <p class="muted-text">命座只能按前缀生效。你可以在 0 命到“已获得命数”之间自由切换，方便测试不同配置。</p>
+    </section>
+  `;
+}
+
+function renderGachaTabHtml() {
+  const profile = getProfile();
+  const bannerKey = game.account.currentBannerKey || getLocalDateKey();
+  const featured = getBannerCharacterByKey(bannerKey);
+  const pityRemaining = Math.max(0, GACHA_PITY_MAX - profile.gacha.cyclePulls);
+  const lastResults = profile.gacha.lastResults ?? [];
+  return `
+    ${renderProfileBannerHtml()}
+    ${buildOverlayTabsHtml("gacha")}
+    ${renderOverlayMessageHtml()}
+    <div class="two-column">
+      <section class="featured-card">
+        <h4>当期 UP 角色</h4>
+        <p>${escapeHtml(featured.name)}</p>
+        <p>基础出角概率 0.6%，第 80 抽提升至 3%，第 120 抽必出。</p>
+        <p>当前保底计数：${profile.gacha.cyclePulls} 抽，距离保底还差 ${pityRemaining} 抽。</p>
+        <p>免费十连：${profile.gacha.freeTenPulls} 次，不计入保底。</p>
+      </section>
+      <section class="gacha-summary-card">
+        <h4>抽卡操作</h4>
+        <div class="gacha-actions">
+          <button class="confirm-button" type="button" data-action="draw-once">单抽（1 巨大文花）</button>
+          <button class="confirm-button" type="button" data-action="draw-ten">十连（10 巨大文花）</button>
+          <button class="secondary-button" type="button" data-action="draw-free-ten">使用免费十连</button>
+        </div>
+        <p>第 20 抽会送一发不计保底的免费十连；第 60 抽会获得文花凭证，下一次卡池刷新时自动兑换 10 巨大文花。</p>
+      </section>
+    </div>
+    <section class="account-section">
+      <h4>最近抽卡结果</h4>
+      ${lastResults.length > 0
+        ? `<div class="gacha-result-grid">
+            ${lastResults
+              .map((item) => `
+                <div class="result-chip">
+                  <strong>${escapeHtml(item.name)}</strong>
+                  <span>${escapeHtml(item.description)}</span>
+                </div>
+              `)
+              .join("")}
+          </div>`
+        : `<p class="muted-text">还没有抽卡记录。</p>`}
+    </section>
+  `;
+}
+
+function renderShopTabHtml() {
+  const profile = getProfile();
+  const cards = RECHARGE_OPTIONS
+    .map((pack, index) => {
+      const actual = profile.shop.firstTopUpDouble ? pack.prototypes * 2 : pack.prototypes;
+      return `
+        <div class="shop-card">
+          <h4>${pack.amountCny} CNY</h4>
+          <p>基础：${pack.prototypes} 文花雏形</p>
+          <p>${profile.shop.firstTopUpDouble ? `首充翻倍：本次到账 ${actual}` : `到账 ${actual} 文花雏形`}</p>
+          <button class="confirm-button" type="button" data-action="topup" data-index="${index}">立即充值</button>
+        </div>
+      `;
+    })
+    .join("");
+  return `
+    ${renderProfileBannerHtml()}
+    ${buildOverlayTabsHtml("shop")}
+    ${renderOverlayMessageHtml()}
+    <section class="account-section">
+      <h4>支付验证</h4>
+      <div class="form-inline">
+        <input id="paymentPasswordInput" class="mini-input" type="password" placeholder="输入支付密码">
+      </div>
+      <p class="muted-text">测试密码：骗你的你根本不知道</p>
+      <p class="muted-text">首充双倍在任意档位首次成功充值后失效。</p>
+    </section>
+    <div class="shop-grid">${cards}</div>
+  `;
+}
+
+function renderAccountOverlay(tab = game.account.overlayTab) {
+  if (!isSignedIn()) {
+    showAuthOverlay("login", "请先登录后再使用账号面板。");
+    return;
+  }
+  syncProfileDailyState();
+  game.account.overlayTab = tab;
+  let title = "账号面板";
+  let html = "";
+  if (tab === "constellation") {
+    title = "角色命座";
+    html = renderConstellationTabHtml();
+  } else if (tab === "gacha") {
+    title = "抽卡";
+    html = renderGachaTabHtml();
+  } else if (tab === "shop") {
+    title = "充值商店";
+    html = renderShopTabHtml();
+  } else {
+    title = "背包";
+    html = renderBagTabHtml();
+  }
+  showRichStartOverlay(title, html);
+}
+
+function consumeResourcesForGreatFlowers() {
+  const profile = getProfile();
+  if (!profile) {
+    return;
+  }
+  if (profile.resources.prototypes > 0) {
+    profile.resources.shards += profile.resources.prototypes;
+    pushProfileMessage(`已自动将 ${profile.resources.prototypes} 文花雏形兑换为文花碎片。`);
+    profile.resources.prototypes = 0;
+  }
+}
+
+function tryConvertResources(kind) {
+  const profile = getProfile();
+  if (!profile) {
+    return;
+  }
+  setOverlayMessage("");
+  if (kind === "prototypes") {
+    if (profile.resources.prototypes <= 0) {
+      setOverlayMessage("当前没有可兑换的文花雏形。");
+    } else {
+      const amount = profile.resources.prototypes;
+      profile.resources.shards += amount;
+      profile.resources.prototypes = 0;
+      setOverlayMessage(`已兑换 ${amount} 文花碎片。`);
+    }
+  } else if (kind === "shards") {
+    const count = Math.floor(profile.resources.shards / 150);
+    if (count <= 0) {
+      setOverlayMessage("文花碎片不足 150，无法兑换巨大文花。");
+    } else {
+      profile.resources.shards -= count * 150;
+      profile.resources.greatFlowers += count;
+      setOverlayMessage(`已兑换 ${count} 巨大文花。`);
+    }
+  } else if (kind === "flowers") {
+    const count = Math.floor(profile.resources.flowers / 2);
+    if (count <= 0) {
+      setOverlayMessage("文花不足 2，无法兑换巨大文花。");
+    } else {
+      profile.resources.flowers -= count * 2;
+      profile.resources.greatFlowers += count;
+      setOverlayMessage(`已兑换 ${count} 巨大文花。`);
+    }
+  }
+  saveCurrentProfile();
+  renderAccountOverlay(game.account.overlayTab);
+}
+
+function setCharacterConstellationLevel(characterId, targetLevel) {
+  const profile = getProfile();
+  if (!profile || !profile.characters?.[characterId]) {
+    return;
+  }
+  const progress = profile.characters[characterId];
+  progress.active = clamp(targetLevel, 0, progress.obtained);
+  setOverlayMessage(`${CHARACTER_NAME_BY_ID[characterId] ?? "角色"} 当前生效 ${progress.active} 命。`);
+  saveCurrentProfile();
+  renderAccountOverlay("constellation");
+}
+
+function getPityCharacterRate(drawNumber) {
+  if (drawNumber >= GACHA_PITY_MAX) {
+    return 1;
+  }
+  if (drawNumber === 80) {
+    return GACHA_80TH_RATE;
+  }
+  if (drawNumber >= 81) {
+    const ratio = (drawNumber - 81) / (GACHA_PITY_MAX - 81);
+    return clamp(GACHA_CHARACTER_RATE + ratio * (1 - GACHA_CHARACTER_RATE), GACHA_CHARACTER_RATE, 1);
+  }
+  return GACHA_CHARACTER_RATE;
+}
+
+function grantFeaturedCharacterCopy(character) {
+  const profile = getProfile();
+  if (!profile) {
+    return {
+      name: character.name,
+      description: "未登录状态无法领奖。"
+    };
+  }
+  const progress = profile.characters[character.id];
+  if (progress.obtained >= 6) {
+    profile.resources.flowers += 5;
+    return {
+      name: character.name,
+      description: "重复命座已转化为 5 文花。"
+    };
+  }
+  progress.obtained += 1;
+  return {
+    name: `${character.name} 的命座`,
+    description: `已获得第 ${progress.obtained} 命素材，可在角色命座中手动激活。`
+  };
+}
+
+function runSingleGachaDraw({ featuredCharacter, countsTowardPity }) {
+  const profile = getProfile();
+  const drawIndex = countsTowardPity ? profile.gacha.cyclePulls + 1 : 0;
+  const hitCharacter = Math.random() < (countsTowardPity ? getPityCharacterRate(drawIndex) : GACHA_CHARACTER_RATE);
+  if (hitCharacter) {
+    if (countsTowardPity) {
+      profile.gacha.cyclePulls = 0;
+      profile.gacha.urgentGranted = false;
+      profile.gacha.lastingGranted = false;
+    }
+    return grantFeaturedCharacterCopy(featuredCharacter);
+  }
+
+  profile.inventory.residue += 1;
+  if (countsTowardPity) {
+    profile.gacha.cyclePulls = clamp(profile.gacha.cyclePulls + 1, 0, GACHA_PITY_MAX);
+    if (profile.gacha.cyclePulls >= 20 && !profile.gacha.urgentGranted) {
+      profile.gacha.urgentGranted = true;
+      profile.gacha.freeTenPulls += 1;
+      profile.inventory.urgentDraft += 1;
+      pushProfileMessage("第 20 抽奖励已发放：获得 1 次免费十连（不计入保底）。");
+    }
+    if (profile.gacha.cyclePulls >= 60 && !profile.gacha.lastingGranted) {
+      profile.gacha.lastingGranted = true;
+      profile.inventory.lastingDraft += 1;
+      profile.inventory.vouchers += 1;
+      pushProfileMessage("第 60 抽奖励已发放：获得 1 张文花凭证，下次卡池刷新时自动兑换 10 巨大文花。");
+    }
+  }
+  return {
+    name: "糟粕",
+    description: "未出角色，获得 1 个糟粕。"
+  };
+}
+
+function recordGachaResults(results, label) {
+  const profile = getProfile();
+  if (!profile) {
+    return;
+  }
+  profile.gacha.lastResults = results.slice(-10);
+  profile.gacha.history.unshift({
+    id: `history-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    label,
+    results,
+    createdAt: Date.now()
+  });
+  profile.gacha.history = profile.gacha.history.slice(0, 30);
+}
+
+function performGachaDraw(batchSize, { freeTen = false } = {}) {
+  const profile = getProfile();
+  if (!profile) {
+    return;
+  }
+  syncProfileDailyState();
+  consumeResourcesForGreatFlowers();
+
+  if (freeTen) {
+    if (profile.gacha.freeTenPulls <= 0) {
+      setOverlayMessage("当前没有可用的免费十连。");
+      renderAccountOverlay("gacha");
+      return;
+    }
+    profile.gacha.freeTenPulls -= 1;
+    if (profile.inventory.urgentDraft > 0) {
+      profile.inventory.urgentDraft -= 1;
+    }
+  } else if (profile.resources.greatFlowers < batchSize) {
+    setOverlayMessage(`巨大文花不足，当前仅有 ${profile.resources.greatFlowers}。`);
+    renderAccountOverlay("gacha");
+    return;
+  } else {
+    profile.resources.greatFlowers -= batchSize;
+  }
+
+  const featuredCharacter = getBannerCharacterByKey(game.account.currentBannerKey || getLocalDateKey());
+  const results = [];
+  for (let i = 0; i < batchSize; i += 1) {
+    results.push(
+      runSingleGachaDraw({
+        featuredCharacter,
+        countsTowardPity: !freeTen
+      })
+    );
+  }
+
+  const label = freeTen ? "免费十连" : batchSize === 10 ? "十连" : "单抽";
+  recordGachaResults(results, label);
+  const characterCount = results.filter((item) => item.name.includes("命座") || item.name === featuredCharacter.name).length;
+  setOverlayMessage(`${label}完成，本次共获得 ${characterCount} 个角色命座结果。`);
+  saveCurrentProfile();
+  renderAccountOverlay("gacha");
+}
+
+function handleTopUp(index) {
+  const profile = getProfile();
+  const pack = RECHARGE_OPTIONS[index];
+  if (!profile || !pack) {
+    return;
+  }
+  const passwordInput = ui.startOverlayContent.querySelector("#paymentPasswordInput");
+  const password = String(passwordInput?.value || "");
+  if (password !== TOPUP_TEST_PASSWORD) {
+    setOverlayMessage("支付密码错误，未完成充值。");
+    renderAccountOverlay("shop");
+    return;
+  }
+  const actual = profile.shop.firstTopUpDouble ? pack.prototypes * 2 : pack.prototypes;
+  profile.resources.prototypes += actual;
+  profile.shop.firstTopUpDouble = false;
+  pushProfileMessage(`充值成功：${pack.amountCny} CNY，到账 ${actual} 文花雏形。`);
+  setOverlayMessage(`充值成功，已到账 ${actual} 文花雏形。`);
+  saveCurrentProfile();
+  renderAccountOverlay("shop");
+}
+
+function handleStartOverlayAction(event) {
+  const actionTarget = event.target.closest("[data-action]");
+  if (!actionTarget) {
+    return;
+  }
+  const action = actionTarget.dataset.action;
+  if (action === "switch-tab") {
+    setOverlayMessage("");
+    renderAccountOverlay(actionTarget.dataset.tab || "bag");
+    return;
+  }
+  if (action === "logout") {
+    logoutAccount();
+    return;
+  }
+  if (action === "convert-prototypes") {
+    tryConvertResources("prototypes");
+    return;
+  }
+  if (action === "convert-shards") {
+    tryConvertResources("shards");
+    return;
+  }
+  if (action === "convert-flowers") {
+    tryConvertResources("flowers");
+    return;
+  }
+  if (action === "set-constellation") {
+    const level = Number(actionTarget.dataset.level);
+    setCharacterConstellationLevel(actionTarget.dataset.character, Number.isNaN(level) ? 0 : level);
+    return;
+  }
+  if (action === "draw-once") {
+    performGachaDraw(1);
+    return;
+  }
+  if (action === "draw-ten") {
+    performGachaDraw(10);
+    return;
+  }
+  if (action === "draw-free-ten") {
+    performGachaDraw(10, { freeTen: true });
+    return;
+  }
+  if (action === "topup") {
+    handleTopUp(Number(actionTarget.dataset.index));
+  }
+}
+
 function init() {
   game.players = [
     createPlayer("p1", WIDTH * 0.43),
     createPlayer("p2", WIDTH * 0.57)
   ];
+  initializeAccountState();
   bindInput();
   bindUi();
   resetToStart();
@@ -393,11 +1364,62 @@ function bindUi() {
   ui.confirmButton.addEventListener("click", confirmSelection);
   ui.restartButton.addEventListener("click", resetToStart);
 
+  ui.authLoginTab.addEventListener("click", () => setAuthMode("login"));
+  ui.authRegisterTab.addEventListener("click", () => setAuthMode("register"));
+  ui.authSubmit.addEventListener("click", handleAuthSubmit);
+  ui.authUsername.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      handleAuthSubmit();
+    }
+  });
+  ui.authPassword.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      handleAuthSubmit();
+    }
+  });
+  ui.authConfirmPassword.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      handleAuthSubmit();
+    }
+  });
+
   ui.startMenuButton.addEventListener("click", () => {
     if (game.phase !== PHASE.START) {
       return;
     }
     ui.startMenuPanel.classList.toggle("hidden");
+  });
+
+  ui.showBagButton.addEventListener("click", () => {
+    if (game.phase !== PHASE.START || !isSignedIn()) {
+      return;
+    }
+    ui.startMenuPanel.classList.add("hidden");
+    renderAccountOverlay("bag");
+  });
+
+  ui.showConstellationButton.addEventListener("click", () => {
+    if (game.phase !== PHASE.START || !isSignedIn()) {
+      return;
+    }
+    ui.startMenuPanel.classList.add("hidden");
+    renderAccountOverlay("constellation");
+  });
+
+  ui.showGachaButton.addEventListener("click", () => {
+    if (game.phase !== PHASE.START || !isSignedIn()) {
+      return;
+    }
+    ui.startMenuPanel.classList.add("hidden");
+    renderAccountOverlay("gacha");
+  });
+
+  ui.showShopButton.addEventListener("click", () => {
+    if (game.phase !== PHASE.START || !isSignedIn()) {
+      return;
+    }
+    ui.startMenuPanel.classList.add("hidden");
+    renderAccountOverlay("shop");
   });
 
   ui.showAuthorsButton.addEventListener("click", () => {
@@ -411,6 +1433,8 @@ function bindUi() {
   ui.startOverlayClose.addEventListener("click", () => {
     closeStartOverlay();
   });
+
+  ui.startOverlayContent.addEventListener("click", handleStartOverlayAction);
 
   ui.startOverlay.addEventListener("click", (event) => {
     if (event.target === ui.startOverlay) {
@@ -524,6 +1548,11 @@ function update(dt, now) {
 
 function updateStart(dt, now) {
   updateBackgroundCycle(dt);
+  if (!isSignedIn()) {
+    ui.phaseBanner.textContent = "请先登录或注册账号";
+    return;
+  }
+  syncProfileDailyState();
 
   game.portals.pvp.spin += dt * 1.5;
   game.portals.pve.spin -= dt * 1.5;
@@ -654,13 +1683,12 @@ function showAuthorsOverlay() {
     return;
   }
   ui.startMenuPanel.classList.add("hidden");
-  ui.startOverlayTitle.textContent = "作者名单";
-  ui.startOverlayText.innerHTML = AUTHOR_NAMES
+  showSimpleStartOverlay(
+    "作者名单",
+    AUTHOR_NAMES
     .map((name, index) => `${index + 1}. ${name}`)
-    .join("<br>");
-  ui.startOverlayImage.classList.add("hidden");
-  ui.startOverlayImage.removeAttribute("src");
-  ui.startOverlay.classList.remove("hidden");
+    .join("<br>")
+  );
 }
 
 function showDonateOverlay() {
@@ -668,19 +1696,16 @@ function showDonateOverlay() {
     return;
   }
   ui.startMenuPanel.classList.add("hidden");
-  ui.startOverlayTitle.textContent = "打赏支持";
-  ui.startOverlayText.innerHTML = "感谢支持项目开发与迭代。<br>请使用微信扫码。";
-  ui.startOverlayImage.src = DONATE_IMAGE_PATH;
-  ui.startOverlayImage.classList.remove("hidden");
-  ui.startOverlay.classList.remove("hidden");
+  showSimpleStartOverlay("打赏支持", "感谢支持项目开发与迭代。<br>请使用微信扫码。", DONATE_IMAGE_PATH);
 }
 
 function closeStartOverlay() {
   ui.startOverlay.classList.add("hidden");
+  resetStartOverlayBody();
 }
 
 function setStartMenuVisible(visible) {
-  ui.startMenuButton.classList.toggle("hidden", !visible);
+  ui.startMenuButton.classList.toggle("hidden", !(visible && isSignedIn()));
   if (!visible) {
     ui.startMenuPanel.classList.add("hidden");
     closeStartOverlay();
@@ -734,12 +1759,14 @@ function hideBattleInfoPanel(resumeBattle) {
 function updateBattleInfoPanelContent() {
   const p1 = game.players[0];
   const p2 = game.players[1];
-  const p1SkillText = getCharacterSkillPanelText(p1.character);
-  const p2SkillText = getCharacterSkillPanelText(p2.character);
+  const p1SkillText = getCharacterSkillPanelText(p1);
+  const p2SkillText = getCharacterSkillPanelText(p2);
+  const p1Constellation = p1.characterConstellationLevel ?? 0;
+  const p2Constellation = p2.characterConstellationLevel ?? 0;
   ui.battleInfoTitle.textContent = "本局角色与武器说明";
-  ui.battleInfoP1Character.textContent = `角色：${p1.character.name}（生命 ${p1.maxHp}，移速倍率 ${formatMultiplier(p1.baseMoveSpeedMultiplier)}）｜技能：${p1SkillText}`;
+  ui.battleInfoP1Character.textContent = `角色：${p1.character.name}（${p1Constellation}命，生命 ${p1.maxHp}，移速倍率 ${formatMultiplier((p1.baseMoveSpeedMultiplier ?? 1) * (p1.staticMoveMultiplier ?? 1))}）｜技能：${p1SkillText}`;
   ui.battleInfoP1Weapon.textContent = `武器：${p1.weapon.name} - ${p1.weapon.description}`;
-  ui.battleInfoP2Character.textContent = `角色：${p2.character.name}（生命 ${p2.maxHp}，移速倍率 ${formatMultiplier(p2.baseMoveSpeedMultiplier)}）｜技能：${p2SkillText}`;
+  ui.battleInfoP2Character.textContent = `角色：${p2.character.name}（${p2Constellation}命，生命 ${p2.maxHp}，移速倍率 ${formatMultiplier((p2.baseMoveSpeedMultiplier ?? 1) * (p2.staticMoveMultiplier ?? 1))}）｜技能：${p2SkillText}`;
   ui.battleInfoP2Weapon.textContent = `武器：${p2.weapon.name} - ${p2.weapon.description}`;
 
   if (game.mode === MODE.PVE && game.boss) {
@@ -786,7 +1813,13 @@ function updatePlayerMovement(player, dt, now, combatEnabled) {
   const moveSpeed = getEffectiveMoveSpeed(player, now);
 
   if (isCharging) {
-    player.vx = approach(player.vx, 0, tuning.friction * dt * 1.2);
+    const canMoveWhileCharging = player.character?.id === "chi-yan" && player.characterConstellationLevel >= 5 && canAct;
+    if (canMoveWhileCharging && move !== 0) {
+      player.facing = move;
+      player.vx = approach(player.vx, move * moveSpeed * 0.78, tuning.accel * dt * 0.8);
+    } else {
+      player.vx = approach(player.vx, 0, tuning.friction * dt * 1.2);
+    }
     if (combatEnabled) {
       handleCharacterSkillInput(player, now, canAct);
     }
@@ -893,6 +1926,14 @@ function tryCastWeaponSkill(player, now) {
   if (!skill) {
     return;
   }
+  if (player.shadowPerfectStrikeReady) {
+    if (now < player.weaponSkillReadyAt) {
+      return;
+    }
+    player.weaponSkillReadyAt = now + (skill.cooldown ?? 1);
+    executeShadowPerfectStrike(player, now);
+    return;
+  }
   if (skill.type === "kunpeng-dust") {
     fireKunpengDust(player, weapon, skill, now);
     return;
@@ -907,6 +1948,82 @@ function tryCastWeaponSkill(player, now) {
     return;
   }
   spawnForwardSkillProjectile(player, weapon, skill);
+}
+
+function executeShadowPerfectStrike(player, now) {
+  const startX = player.x + player.w / 2;
+  const dashDistance = WIDTH * 0.5 * player.facing;
+  const nextCenterX = clamp(startX + dashDistance, player.w / 2, WIDTH - player.w / 2);
+  const endX = nextCenterX;
+  const minX = Math.min(startX, endX);
+  const maxX = Math.max(startX, endX);
+  const centerY = player.y + player.h * 0.5;
+  let hitAny = false;
+
+  for (const target of getEnemyUnits(player)) {
+    if (!target || target.hp <= 0) {
+      continue;
+    }
+    const circle = getEntityHitCircle(target);
+    const withinPath = circle.x + circle.radius >= minX
+      && circle.x - circle.radius <= maxX
+      && Math.abs(circle.y - centerY) <= player.h * 0.9;
+    if (!withinPath) {
+      continue;
+    }
+    hitAny = true;
+    if (target.id === "BOSS") {
+      applyDamageToBoss(target, 10, player.facing * 240, player);
+    } else {
+      applyHitToPlayer(target, 10, 0, player.facing * 240, 1, player);
+    }
+  }
+
+  player.x = clamp(endX - player.w / 2, 0, WIDTH - player.w);
+  player.vx = 0;
+  player.vy = 0;
+  player.shadowPerfectStrikeReady = false;
+  const healAmount = Math.min(player.maxHp, player.hp + 10) - player.hp;
+  player.hp += healAmount;
+  showTip(hitAny ? `${player.id} 发动完美隐身突进` : `${player.id} 释放隐身突进`);
+  void now;
+}
+
+function tryTriggerPerfectShadowCloak(player, now) {
+  if (player.character?.id !== "shadow-ninja" || player.characterConstellationLevel < 6) {
+    return;
+  }
+  const selfCircle = getEntityHitCircle(player);
+  const triggerRadius = selfCircle.radius * 4;
+  const nearbyProjectile = game.projectiles.some((projectile) => {
+    if (!projectile) {
+      return false;
+    }
+    const owner = findActorById(projectile.owner);
+    if (!owner || owner.id === player.id) {
+      return false;
+    }
+    if (owner.id !== "BOSS" && owner.side === player.side) {
+      return false;
+    }
+    return distance(projectile.x, projectile.y, selfCircle.x, selfCircle.y) <= triggerRadius + (projectile.radius ?? 0);
+  });
+
+  if (!nearbyProjectile) {
+    return;
+  }
+  player.shadowPerfectStrikeReady = true;
+  for (const target of getEnemyUnits(player)) {
+    if (!target || target.hp <= 0) {
+      continue;
+    }
+    if (target.id === "BOSS") {
+      target.stunnedUntil = Math.max(target.stunnedUntil ?? 0, now + 2);
+    } else {
+      target.stunnedUntil = Math.max(target.stunnedUntil, now + 2);
+    }
+  }
+  showTip(`${player.id} 触发完美隐身`);
 }
 
 function consumeDashCharge(player, now) {
@@ -1040,7 +2157,7 @@ function tryOrbitDustHitPlayer(owner, dust, target, skill) {
     return false;
   }
   const dir = Math.sign(circle.x - dust.x) || owner.facing || 1;
-  return applyHitToPlayer(target, skill.damage ?? 2, 0, dir * 130, 1);
+  return applyHitToPlayer(target, skill.damage ?? 2, 0, dir * 130, 1, owner);
 }
 
 function tryOrbitDustHitBoss(owner, dust, boss, skill) {
@@ -1052,9 +2169,7 @@ function tryOrbitDustHitBoss(owner, dust, boss, skill) {
     return false;
   }
   const dir = Math.sign(circle.x - dust.x) || owner.facing || 1;
-  boss.hp = Math.max(0, boss.hp - (skill.damage ?? 2));
-  boss.vx += dir * 120;
-  return true;
+  return applyDamageToBoss(boss, skill.damage ?? 2, dir * 120, owner);
 }
 
 function fireKunpengDust(player, weapon, skill, now) {
@@ -1088,7 +2203,7 @@ function fireKunpengDust(player, weapon, skill, now) {
 }
 
 function getCharacterSkillConfig(player) {
-  return player.character?.characterSkill ?? null;
+  return player.runtimeCharacterSkill ?? player.character?.characterSkill ?? null;
 }
 
 function isCharacterSkillHeld(player) {
@@ -1172,6 +2287,9 @@ function addChiyanChargeKnockback(player, knockbackMultiplier = 1) {
   if (!player.chiyanCharge?.active) {
     return;
   }
+  if (player.characterConstellationLevel >= 6) {
+    return;
+  }
   const breakNeed = skill.breakKnockback ?? 4;
   const normalized = Math.max(0, knockbackMultiplier);
   player.chiyanCharge.breakAccum += normalized;
@@ -1198,6 +2316,14 @@ function tryCastCharacterSkill(player, skill, now) {
   if (skill.type === "shadow-cloak") {
     player.invisibleUntil = Math.max(player.invisibleUntil, now + (skill.duration ?? 1.5));
     player.characterSkillReadyAt = now + (skill.cooldown ?? 6);
+    if (player.characterConstellationLevel >= 5) {
+      const maxCharges = player.dashChargeMax ?? GAME_DATA.tuning.dashChargeMax ?? 3;
+      player.dashCharges = clamp((player.dashCharges ?? 0) + 3, 0, maxCharges);
+      if (player.dashCharges >= maxCharges) {
+        player.dashChargeNextAt = 0;
+      }
+    }
+    tryTriggerPerfectShadowCloak(player, now);
     showTip(`${player.id} 进入隐身`);
   }
 }
@@ -1207,10 +2333,11 @@ function castQingLanWindSkill(player, skill, now) {
   const cooldown = skill.cooldown ?? 6;
   const damage = skill.aoeDamage ?? 2;
   const radius = skill.aoeRadius ?? 82;
+  const level = player.characterConstellationLevel;
 
   if (!existingMark) {
     player.windMark = createWindMark(player, skill, now);
-    player.characterSkillReadyAt = now + cooldown;
+    player.characterSkillReadyAt = level >= 3 ? now : now + cooldown;
     showTip(`${player.id} 留下风印`);
     return;
   }
@@ -1225,6 +2352,7 @@ function castQingLanWindSkill(player, skill, now) {
     player.jumpCount = 0;
   }
 
+  let hitAny = false;
   for (const target of getEnemyUnits(player)) {
     if (!target || target.hp <= 0) {
       continue;
@@ -1234,18 +2362,25 @@ function castQingLanWindSkill(player, skill, now) {
     if (!inRange) {
       continue;
     }
+    hitAny = true;
     if (target.id === "BOSS") {
-      target.hp = Math.max(0, target.hp - damage);
-      target.vx += player.facing * 180;
-      target.stunnedUntil = Math.max(target.stunnedUntil ?? 0, now + 0.16);
+      applyDamageToBoss(target, damage, player.facing * 180, player, level >= 5 ? 1 : 0);
     } else {
-      applyHitToPlayer(target, damage, 0.16, player.facing * 180, 1);
+      applyHitToPlayer(target, damage, level >= 5 ? 1 : 0, player.facing * 180, 1, player);
+    }
+    if (level >= 5) {
+      applyVulnerable(target, now, 2, VULNERABLE_DURATION);
     }
   }
 
   player.windMark = null;
-  player.characterSkillReadyAt = now + cooldown;
-  showTip(`${player.id} 借风印引渡`);
+  if (level >= 6 && now >= (player.qinglanCooldownResetReadyAt ?? 0)) {
+    player.characterSkillReadyAt = now;
+    player.qinglanCooldownResetReadyAt = now + 15;
+  } else {
+    player.characterSkillReadyAt = now + cooldown;
+  }
+  showTip(hitAny ? `${player.id} 借风印引渡并命中敌人` : `${player.id} 借风印引渡`);
 }
 
 function createWindMark(player, skill, now) {
@@ -1262,6 +2397,8 @@ function createWindMark(player, skill, now) {
 function castChiyanFlameCurtain(player, skill, now) {
   const centerX = player.x + player.w / 2;
   const effectSeconds = skill.effectSeconds ?? 0.42;
+  const level = player.characterConstellationLevel;
+  let hitAny = false;
   game.fireCurtains.push({
     ownerId: player.id,
     facing: player.facing,
@@ -1279,15 +2416,17 @@ function castChiyanFlameCurtain(player, skill, now) {
     if (!ahead) {
       continue;
     }
+    hitAny = true;
     if (target.id === "BOSS") {
-      target.hp = Math.max(0, target.hp - (skill.damage ?? 15));
-      target.vx += player.facing * 300;
-      target.stunnedUntil = Math.max(target.stunnedUntil ?? 0, now + 0.32);
+      applyDamageToBoss(target, skill.damage ?? 15, player.facing * 300, player, 0.32);
     } else {
-      applyHitToPlayer(target, skill.damage ?? 15, 0.32, player.facing * 280, 1);
+      applyHitToPlayer(target, skill.damage ?? 15, 0.32, player.facing * 280, 1, player);
     }
   }
 
+  if (level >= 3 && hitAny) {
+    player.characterSkillReadyAt = now;
+  }
   showTip(`${player.id} 释放火幕`);
 }
 
@@ -1425,7 +2564,7 @@ function updateBoss(dt, now) {
     if (now >= boss.meleeReadyAt) {
       for (const player of alivePlayers) {
         if (entitiesOverlap(boss, player)) {
-          applyHitToPlayer(player, 4, 0.2, boss.facing * 220, 1);
+          applyHitToPlayer(player, 4, 0.2, boss.facing * 220, 1, boss);
           boss.meleeReadyAt = now + 1.1;
           break;
         }
@@ -1521,6 +2660,13 @@ function tryProjectileHitBoss(projectile, boss) {
   return true;
 }
 
+function getDashDamageValue(player) {
+  if (player.dashDamageOverride != null) {
+    return player.dashDamageOverride;
+  }
+  return Math.max(1, Math.round(GAME_DATA.tuning.dashDamage * (player.dashDamageMultiplier ?? 1)));
+}
+
 function resolveDashHit(attacker, defender, now) {
   if (attacker.hp <= 0 || defender.hp <= 0) {
     return;
@@ -1536,9 +2682,9 @@ function resolveDashHit(attacker, defender, now) {
   }
 
   attacker.dashHitMarks.add(defender.id);
-  const damage = Math.max(1, Math.round(GAME_DATA.tuning.dashDamage * (attacker.dashDamageMultiplier ?? 1)));
+  const damage = getDashDamageValue(attacker);
   const knockback = attacker.facing * 330 * (attacker.dashKnockbackMultiplier ?? 1);
-  applyHitToPlayer(defender, damage, 0, knockback, attacker.dashKnockbackMultiplier ?? 1);
+  applyHitToPlayer(defender, damage, 0, knockback, attacker.dashKnockbackMultiplier ?? 1, attacker);
 }
 
 function resolveDashHitToBoss(attacker, boss, now) {
@@ -1556,10 +2702,9 @@ function resolveDashHitToBoss(attacker, boss, now) {
   }
 
   attacker.dashHitMarks.add("boss");
-  const damage = Math.max(1, Math.round(GAME_DATA.tuning.dashDamage * (attacker.dashDamageMultiplier ?? 1)));
+  const damage = getDashDamageValue(attacker);
   const knockback = attacker.facing * 260 * (attacker.dashKnockbackMultiplier ?? 1);
-  boss.hp = Math.max(0, boss.hp - damage);
-  boss.vx += knockback;
+  applyDamageToBoss(boss, damage, knockback, attacker);
 }
 
 function isShadowCloakActive(player, now = game.now) {
@@ -1569,17 +2714,93 @@ function isShadowCloakActive(player, now = game.now) {
   return player.character?.id === "shadow-ninja" && now < (player.invisibleUntil ?? 0);
 }
 
-function applyHitToPlayer(player, damage, stun, knockbackX, knockbackMultiplier = 1) {
+function randomInt(min, max) {
+  const floorMin = Math.ceil(min);
+  const floorMax = Math.floor(max);
+  return Math.floor(Math.random() * (floorMax - floorMin + 1)) + floorMin;
+}
+
+function applyVulnerable(target, now, bonus = 2, duration = VULNERABLE_DURATION) {
+  if (!target) {
+    return;
+  }
+  target.vulnerableUntil = Math.max(target.vulnerableUntil ?? 0, now + duration);
+  target.vulnerableBonus = Math.max(target.vulnerableBonus ?? 0, bonus);
+}
+
+function getIncomingDamageBonus(target, now = game.now) {
+  if (!target) {
+    return 0;
+  }
+  if (now < (target.vulnerableUntil ?? 0)) {
+    return target.vulnerableBonus ?? 0;
+  }
+  return 0;
+}
+
+function triggerOwnerDamagePassives(owner, actualDamage) {
+  if (!owner || owner.id === "BOSS" || actualDamage <= 0 || owner.hp <= 0) {
+    return;
+  }
+  if (owner.character?.id === "ling-mu" && owner.characterConstellationLevel >= 2 && game.now >= (owner.lingmuLifeBurstReadyAt ?? 0)) {
+    owner.lingmuLifeBurstReadyAt = game.now + 10;
+    const heal = randomInt(0, 10);
+    if (heal > 0) {
+      owner.hp = Math.min(owner.maxHp, owner.hp + heal);
+      showTip(`${owner.id} 的灵木 2 命回复了 ${heal} 点生命`);
+    }
+  }
+}
+
+function triggerVictimDamagePassives(player) {
+  if (!player || player.hp <= 0) {
+    return;
+  }
+  if (player.character?.id === "ling-mu" && player.characterConstellationLevel >= 4) {
+    const heal = randomInt(0, 5);
+    if (heal > 0) {
+      player.hp = Math.min(player.maxHp, player.hp + heal);
+      showTip(`${player.id} 的灵木 4 命回复了 ${heal} 点生命`);
+    }
+  }
+}
+
+function applyDamageToBoss(boss, damage, knockbackX = 0, owner = null, stun = 0) {
+  if (!boss || boss.hp <= 0) {
+    return false;
+  }
+  const totalDamage = Math.max(0, damage + getIncomingDamageBonus(boss));
+  if (totalDamage <= 0) {
+    return false;
+  }
+  const actualDamage = Math.min(boss.hp, totalDamage);
+  boss.hp = Math.max(0, boss.hp - totalDamage);
+  boss.vx += knockbackX;
+  if (stun > 0) {
+    boss.stunnedUntil = Math.max(boss.stunnedUntil ?? 0, game.now + stun);
+  }
+  triggerOwnerDamagePassives(owner, actualDamage);
+  return true;
+}
+
+function applyHitToPlayer(player, damage, stun, knockbackX, knockbackMultiplier = 1, owner = null) {
   if (!player || player.hp <= 0) {
     return false;
   }
   if (isShadowCloakActive(player)) {
     return false;
   }
-  player.hp = Math.max(0, player.hp - damage);
+  const totalDamage = Math.max(0, damage + getIncomingDamageBonus(player));
+  if (totalDamage <= 0) {
+    return false;
+  }
+  const actualDamage = Math.min(player.hp, totalDamage);
+  player.hp = Math.max(0, player.hp - totalDamage);
   player.vx += knockbackX;
   player.stunnedUntil = Math.max(player.stunnedUntil, game.now + stun);
   addChiyanChargeKnockback(player, knockbackMultiplier);
+  triggerVictimDamagePassives(player);
+  triggerOwnerDamagePassives(owner, actualDamage);
   tryTriggerLingmuRevive(player);
   return true;
 }
@@ -1592,11 +2813,12 @@ function tryTriggerLingmuRevive(player) {
   if (!skill || skill.type !== "verdant-revival") {
     return false;
   }
-  if (player.lingmuReviveUsed) {
+  if ((player.lingmuRevivesRemaining ?? 0) <= 0) {
     return false;
   }
 
-  player.lingmuReviveUsed = true;
+  player.lingmuRevivesRemaining -= 1;
+  player.lingmuReviveUsed = player.lingmuRevivesRemaining <= 0;
   const ratio = skill.reviveHpRatio ?? 0.2;
   player.hp = Math.max(1, Math.round(player.maxHp * ratio));
   const stunSeconds = skill.stunSeconds ?? 3;
@@ -1609,6 +2831,18 @@ function tryTriggerLingmuRevive(player) {
     } else {
       target.stunnedUntil = Math.max(target.stunnedUntil, game.now + stunSeconds);
     }
+  }
+  if (player.characterConstellationLevel >= 6) {
+    game.healingTotems.push({
+      id: `totem-${Math.random().toString(36).slice(2, 9)}`,
+      ownerId: player.id,
+      x: player.x + player.w / 2,
+      y: player.y + player.h * 0.58,
+      radius: HEALING_TOTEM_RADIUS,
+      createdAt: game.now,
+      expiresAt: game.now + HEALING_TOTEM_DURATION,
+      nextTickAt: game.now + HEALING_TOTEM_TICK
+    });
   }
   showTip(`${player.id} 触发灵木回生`);
   return true;
@@ -1633,7 +2867,8 @@ function applyProjectileHitToPlayer(projectile, target, owner) {
     projectile.damage ?? 0,
     projectile.stun ?? 0,
     knockback,
-    projectile.knockbackMultiplier ?? 1
+    projectile.knockbackMultiplier ?? 1,
+    owner
   );
   if (landed) {
     tryTriggerWeaponOnHit(projectile, owner);
@@ -1663,9 +2898,10 @@ function applyProjectileHitToBoss(projectile, boss, owner) {
     spawnWebZone(boss, circle.x, circle.y, projectile.webTrapRadius ?? GAME_DATA.effects.web.trapRadius ?? 92, projectile.owner);
   }
 
-  boss.hp = Math.max(0, boss.hp - (projectile.damage ?? 0));
-  boss.vx += Math.sign(projectile.vx || 0) * 180;
-  tryTriggerWeaponOnHit(projectile, owner);
+  const hit = applyDamageToBoss(boss, projectile.damage ?? 0, Math.sign(projectile.vx || 0) * 180, owner);
+  if (hit) {
+    tryTriggerWeaponOnHit(projectile, owner);
+  }
 }
 
 function spawnWebZone(target, x, y, radius, ownerId) {
@@ -1769,9 +3005,36 @@ function getBindMoveMultiplier(target, now) {
   return Math.pow(GAME_DATA.effects.web.bindMoveMultiplier ?? 0.89, layers);
 }
 
+function getAlliedUnits(ownerId) {
+  const owner = findActorById(ownerId);
+  if (!owner || owner.id === "BOSS") {
+    return [];
+  }
+  if (game.mode === MODE.PVE) {
+    return game.players.filter((player) => player.hp > 0);
+  }
+  return owner.hp > 0 ? [owner] : [];
+}
+
+function updateHealingTotems(now) {
+  game.healingTotems = game.healingTotems.filter((totem) => now < totem.expiresAt);
+  for (const totem of game.healingTotems) {
+    while (now >= (totem.nextTickAt ?? 0) && now < totem.expiresAt) {
+      for (const ally of getAlliedUnits(totem.ownerId)) {
+        const circle = getEntityHitCircle(ally);
+        if (distance(circle.x, circle.y, totem.x, totem.y) <= totem.radius + circle.radius) {
+          ally.hp = Math.min(ally.maxHp, ally.hp + 2);
+        }
+      }
+      totem.nextTickAt += HEALING_TOTEM_TICK;
+    }
+  }
+}
+
 function updateTimedEffects(now) {
   game.sandstorms = game.sandstorms.filter((storm) => now < storm.expiresAt);
   game.fireCurtains = game.fireCurtains.filter((effect) => now < effect.expiresAt);
+  updateHealingTotems(now);
 
   for (const player of game.players) {
     if (player.hp <= 0) {
@@ -1803,9 +3066,10 @@ function tickPoisonDamage(target, now) {
   }
 
   while (now >= target.poisonTickAt) {
-    const damage = target.poisonStacks.length * sand.poisonDamagePerStack;
+    const damage = target.poisonStacks.length * sand.poisonDamagePerStack + getIncomingDamageBonus(target, now);
     target.hp = Math.max(0, target.hp - damage);
     if (target.side) {
+      triggerVictimDamagePassives(target);
       tryTriggerLingmuRevive(target);
     }
     target.poisonTickAt += sand.poisonTickInterval;
@@ -1853,11 +3117,15 @@ function refreshWebZoneEffects(now) {
 
 function getEffectiveMoveSpeed(player, now) {
   let speed = GAME_DATA.tuning.moveSpeed * (player.baseMoveSpeedMultiplier ?? 1);
+  speed *= player.staticMoveMultiplier ?? 1;
   if (now < (player.speedBuffUntil ?? 0)) {
     speed *= GAME_DATA.effects.sand.speedBuffMultiplier;
   }
   if (now < (player.speedDebuffUntil ?? 0)) {
     speed *= GAME_DATA.effects.sand.speedDebuffMultiplier;
+  }
+  if (player.character?.id === "shadow-ninja" && player.characterConstellationLevel >= 2 && isShadowCloakActive(player, now)) {
+    speed *= 1.05;
   }
   speed *= getBindMoveMultiplier(player, now);
   speed *= player.webSlowMultiplier ?? 1;
@@ -2022,9 +3290,11 @@ function updatePlayerSkillHud(player, weaponFill, weaponText, characterFill, cha
   }
 
   if (characterSkill.passive) {
-    const ready = player.lingmuReviveUsed ? 0 : 1;
+    const remaining = Math.max(0, player.lingmuRevivesRemaining ?? (player.lingmuReviveUsed ? 0 : 1));
+    const maxCharges = player.characterConstellationLevel >= 6 ? 2 : 1;
+    const ready = remaining > 0 ? remaining / maxCharges : 0;
     characterFill.style.width = `${(ready * 100).toFixed(1)}%`;
-    characterText.textContent = player.lingmuReviveUsed ? "角色: 被动已触发" : "角色: 被动待命";
+    characterText.textContent = remaining > 0 ? `角色: 被动待命 ${remaining}/${maxCharges}` : "角色: 被动已触发";
     return;
   }
 
@@ -2033,6 +3303,12 @@ function updatePlayerSkillHud(player, weaponFill, weaponText, characterFill, cha
     const chargeProgress = clamp((now - player.chiyanCharge.startedAt) / chargeNeed, 0, 1);
     characterFill.style.width = `${(chargeProgress * 100).toFixed(1)}%`;
     characterText.textContent = `角色: 蓄力 ${Math.round(chargeProgress * 100)}%`;
+    return;
+  }
+
+  if (player.shadowPerfectStrikeReady) {
+    characterFill.style.width = "100%";
+    characterText.textContent = "角色: 完隐待发";
     return;
   }
 
@@ -2102,6 +3378,10 @@ function collectNegativeStatuses(player, now) {
 
   if (now < (player.speedDebuffUntil ?? 0)) {
     statuses.push({ symbol: "迟", layers: 1, title: "减速" });
+  }
+
+  if (now < (player.vulnerableUntil ?? 0)) {
+    statuses.push({ symbol: "易", layers: player.vulnerableBonus ?? 2, title: "易伤" });
   }
 
   const bindLayers = getBindLayerCount(player, now);
@@ -2227,6 +3507,11 @@ function renderSelectionStep() {
     li.textContent = `${key}: ${value}`;
     ui.detailStats.appendChild(li);
   }
+  if (GAME_DATA.characters.some((character) => character.id === current.id)) {
+    const li = document.createElement("li");
+    li.textContent = `当前命座: ${getActiveConstellationLevel(current.id)} / 已获得 ${getObtainedConstellationLevel(current.id)}`;
+    ui.detailStats.appendChild(li);
+  }
 
   ui.selectionPath.textContent = buildSelectionPathText();
   requestAnimationFrame(() => {
@@ -2304,6 +3589,7 @@ function enterBattle() {
   game.webZones.length = 0;
   game.sandstorms.length = 0;
   game.fireCurtains.length = 0;
+  game.healingTotems.length = 0;
   game.phase = PHASE.BATTLE;
   game.isPaused = false;
   game.pauseReason = "";
@@ -2320,14 +3606,83 @@ function enterBattle() {
   updateHud();
 }
 
+function applyCharacterConstellationSetup(player) {
+  const character = player.character;
+  const baseSkill = character?.characterSkill ? { ...character.characterSkill } : null;
+  const level = character ? getActiveConstellationLevel(character.id) : 0;
+  player.characterConstellationLevel = level;
+  player.runtimeCharacterSkill = baseSkill;
+  player.staticMoveMultiplier = 1;
+  player.dashDamageOverride = null;
+  player.shadowPerfectStrikeReady = false;
+  player.qinglanCooldownResetReadyAt = 0;
+  player.lingmuLifeBurstReadyAt = 0;
+  player.lingmuRevivesRemaining = 1;
+
+  if (!character) {
+    return;
+  }
+
+  if (character.id === "qing-lan") {
+    if (level >= 1 && player.runtimeCharacterSkill) {
+      player.runtimeCharacterSkill.cooldown = Math.max(0, (player.runtimeCharacterSkill.cooldown ?? 6) - 1);
+    }
+    if (level >= 2) {
+      player.staticMoveMultiplier *= 1.02;
+    }
+    if (level >= 4 && player.runtimeCharacterSkill) {
+      player.runtimeCharacterSkill.aoeDamage = 5;
+    }
+  } else if (character.id === "chi-yan") {
+    if (level >= 1) {
+      player.staticMoveMultiplier *= 1.02;
+    }
+    if (player.runtimeCharacterSkill) {
+      let chargeSeconds = player.runtimeCharacterSkill.chargeSeconds ?? 3;
+      if (level >= 2) {
+        chargeSeconds -= 1;
+      }
+      if (level >= 4) {
+        chargeSeconds += 2;
+      }
+      player.runtimeCharacterSkill.chargeSeconds = Math.max(0.5, chargeSeconds);
+    }
+  } else if (character.id === "ling-mu") {
+    if (level >= 1) {
+      player.staticMoveMultiplier *= 1.02;
+    }
+    if (level >= 4) {
+      player.staticMoveMultiplier *= 1.01;
+    }
+    if (level >= 5) {
+      player.staticMoveMultiplier *= 0.96;
+    }
+    if (level >= 3) {
+      player.maxHp += 5;
+    }
+    player.lingmuRevivesRemaining = level >= 6 ? 2 : 1;
+  } else if (character.id === "shadow-ninja") {
+    if (player.runtimeCharacterSkill && level >= 1) {
+      player.runtimeCharacterSkill.duration = (player.runtimeCharacterSkill.duration ?? 1.5) + 1;
+    }
+    if (level >= 3) {
+      player.maxHp = Math.max(player.maxHp, 100);
+    }
+    if (level >= 4) {
+      player.dashDamageOverride = 6;
+    }
+  }
+}
+
 function preparePlayerForBattle(player) {
   player.maxHp = player.character?.baseHp ?? GAME_DATA.tuning.maxHp;
-  player.hp = player.maxHp;
   player.baseMoveSpeedMultiplier = player.character?.moveSpeedMultiplier ?? 1;
   player.maxJumps = player.character?.maxJumps ?? 1;
   player.jumpCount = 0;
   player.dashDamageMultiplier = player.character?.dashDamageMultiplier ?? 1;
   player.dashKnockbackMultiplier = player.character?.dashKnockbackMultiplier ?? 1;
+  applyCharacterConstellationSetup(player);
+  player.hp = player.maxHp;
   player.dashChargeMax = GAME_DATA.tuning.dashChargeMax ?? 3;
   player.dashCharges = player.dashChargeMax;
   player.dashChargeNextAt = 0;
@@ -2360,6 +3715,8 @@ function preparePlayerForBattle(player) {
   player.chiyanCharge.startedAt = 0;
   player.chiyanCharge.breakAccum = 0;
   player.lingmuReviveUsed = false;
+  player.vulnerableUntil = 0;
+  player.vulnerableBonus = 0;
   player.invisibleUntil = 0;
   player.portalTouch = null;
 }
@@ -2401,6 +3758,8 @@ function createBoss(data) {
     webZoneIds: new Set(),
     webSlowMultiplier: 1,
     jumpLocked: false,
+    vulnerableUntil: 0,
+    vulnerableBonus: 0,
     stunnedUntil: 0,
     skillReadyAt: 0,
     meleeReadyAt: 0
@@ -2431,6 +3790,7 @@ function resetToStart() {
   game.webZones.length = 0;
   game.sandstorms.length = 0;
   game.fireCurtains.length = 0;
+  game.healingTotems.length = 0;
   game.boss = null;
   game.portals = createPortals();
   game.backgroundTimer = 0;
@@ -2439,8 +3799,6 @@ function resetToStart() {
 
   const p1 = game.players[0];
   const p2 = game.players[1];
-  p1.hp = p1.maxHp;
-  p2.hp = p2.maxHp;
   p1.x = WIDTH * 0.43;
   p2.x = WIDTH * 0.57;
   p1.y = getGroundY() - p1.h;
@@ -2465,8 +3823,12 @@ function resetToStart() {
   p2.stunnedUntil = 0;
   p1.maxHp = GAME_DATA.tuning.maxHp;
   p2.maxHp = GAME_DATA.tuning.maxHp;
+  p1.hp = p1.maxHp;
+  p2.hp = p2.maxHp;
   p1.baseMoveSpeedMultiplier = 1;
   p2.baseMoveSpeedMultiplier = 1;
+  p1.staticMoveMultiplier = 1;
+  p2.staticMoveMultiplier = 1;
   p1.maxJumps = 1;
   p2.maxJumps = 1;
   p1.jumpCount = 0;
@@ -2475,6 +3837,8 @@ function resetToStart() {
   p2.dashDamageMultiplier = 1;
   p1.dashKnockbackMultiplier = 1;
   p2.dashKnockbackMultiplier = 1;
+  p1.dashDamageOverride = null;
+  p2.dashDamageOverride = null;
   p1.dashChargeMax = GAME_DATA.tuning.dashChargeMax ?? 3;
   p2.dashChargeMax = GAME_DATA.tuning.dashChargeMax ?? 3;
   p1.dashCharges = p1.dashChargeMax;
@@ -2517,8 +3881,24 @@ function resetToStart() {
   p2.chiyanCharge.breakAccum = 0;
   p1.lingmuReviveUsed = false;
   p2.lingmuReviveUsed = false;
+  p1.lingmuRevivesRemaining = 1;
+  p2.lingmuRevivesRemaining = 1;
+  p1.lingmuLifeBurstReadyAt = 0;
+  p2.lingmuLifeBurstReadyAt = 0;
   p1.invisibleUntil = 0;
   p2.invisibleUntil = 0;
+  p1.shadowPerfectStrikeReady = false;
+  p2.shadowPerfectStrikeReady = false;
+  p1.qinglanCooldownResetReadyAt = 0;
+  p2.qinglanCooldownResetReadyAt = 0;
+  p1.characterConstellationLevel = 0;
+  p2.characterConstellationLevel = 0;
+  p1.vulnerableUntil = 0;
+  p2.vulnerableUntil = 0;
+  p1.vulnerableBonus = 0;
+  p2.vulnerableBonus = 0;
+  p1.runtimeCharacterSkill = null;
+  p2.runtimeCharacterSkill = null;
   p1.portalTouch = null;
   p2.portalTouch = null;
   p1.character = GAME_DATA.characters[0];
@@ -2564,6 +3944,7 @@ function render(now) {
   }
   drawKunpengDusts(now);
   drawWebZones(now);
+  drawHealingTotems(now);
   drawPlayer(game.players[0], now);
   drawPlayer(game.players[1], now);
   if (game.mode === MODE.PVE && game.boss) {
@@ -2785,13 +4166,16 @@ function drawPlayer(player, now) {
   ctx.textAlign = "center";
   ctx.fillText(player.id, drawX + player.w / 2, drawY + player.h + 18);
 
-  if (invisible || player.chiyanCharge?.active) {
+  if (invisible || player.chiyanCharge?.active || player.shadowPerfectStrikeReady) {
     const labels = [];
     if (invisible) {
       labels.push("隐身");
     }
     if (player.chiyanCharge?.active) {
       labels.push("蓄力");
+    }
+    if (player.shadowPerfectStrikeReady) {
+      labels.push("完隐");
     }
     ctx.fillStyle = "rgba(237, 243, 255, 0.92)";
     ctx.font = "bold 13px Microsoft YaHei";
@@ -2837,10 +4221,17 @@ function drawBoss(boss, now) {
     0,
     NEGATIVE_LAYER_CAP
   );
-  if (poisonCount > 0) {
+  if (poisonCount > 0 || game.now < (boss.vulnerableUntil ?? 0)) {
     ctx.fillStyle = "rgba(201, 255, 180, 0.96)";
     ctx.font = "bold 13px Microsoft YaHei";
-    ctx.fillText(`中毒 x${poisonCount}`, boss.x + boss.w / 2, boss.y + boss.h + 36);
+    const labels = [];
+    if (poisonCount > 0) {
+      labels.push(`中毒 x${poisonCount}`);
+    }
+    if (game.now < (boss.vulnerableUntil ?? 0)) {
+      labels.push(`易伤 +${boss.vulnerableBonus ?? 2}`);
+    }
+    ctx.fillText(labels.join(" | "), boss.x + boss.w / 2, boss.y + boss.h + 36);
   }
 }
 
@@ -2896,6 +4287,45 @@ function drawWebZones(now) {
       ctx.lineTo(zone.x + Math.cos(angle) * outer, zone.y + Math.sin(angle) * outer);
       ctx.stroke();
     }
+  }
+  ctx.restore();
+}
+
+function drawHealingTotems(now) {
+  const activeTotems = game.healingTotems.filter((totem) => now < totem.expiresAt);
+  if (activeTotems.length === 0) {
+    return;
+  }
+
+  ctx.save();
+  for (const totem of activeTotems) {
+    const lifeRate = clamp((totem.expiresAt - now) / HEALING_TOTEM_DURATION, 0, 1);
+    const alpha = 0.18 + lifeRate * 0.18;
+    const gradient = ctx.createRadialGradient(totem.x, totem.y, totem.radius * 0.18, totem.x, totem.y, totem.radius);
+    gradient.addColorStop(0, `rgba(188, 255, 190, ${(alpha + 0.16).toFixed(3)})`);
+    gradient.addColorStop(0.58, `rgba(97, 201, 112, ${alpha.toFixed(3)})`);
+    gradient.addColorStop(1, "rgba(60, 140, 78, 0)");
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.arc(totem.x, totem.y, totem.radius, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = `rgba(232, 255, 234, ${(0.32 + lifeRate * 0.14).toFixed(3)})`;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(totem.x, totem.y, totem.radius * 0.88, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.fillStyle = "rgba(129, 214, 142, 0.92)";
+    ctx.beginPath();
+    ctx.moveTo(totem.x, totem.y - 28);
+    ctx.lineTo(totem.x - 18, totem.y + 8);
+    ctx.lineTo(totem.x + 18, totem.y + 8);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.fillStyle = "rgba(121, 79, 46, 0.92)";
+    ctx.fillRect(totem.x - 4, totem.y + 8, 8, 22);
   }
   ctx.restore();
 }
@@ -3078,22 +4508,27 @@ function getCharacterHue(characterId) {
   return 0;
 }
 
-function getCharacterSkillPanelText(character) {
-  if (!character?.characterSkill) {
+function getCharacterSkillPanelText(characterOrPlayer) {
+  const player = characterOrPlayer?.character ? characterOrPlayer : null;
+  const character = player?.character ?? characterOrPlayer;
+  const skill = player?.runtimeCharacterSkill ?? character?.characterSkill;
+  if (!skill) {
     return "无";
   }
-  const skill = character.characterSkill;
   if (skill.type === "wind-mark") {
-    return "风印瞬移/落点小范围2伤害（冷却6s）";
+    const cooldown = skill.cooldown ?? 6;
+    const damage = skill.aoeDamage ?? 2;
+    return `风印瞬移/落点小范围${damage}伤害（冷却${cooldown}s）`;
   }
   if (skill.type === "flame-curtain") {
-    return "长按蓄力3s，成功后前方全域15伤害（冷却6s）";
+    return `长按蓄力${skill.chargeSeconds ?? 3}s，成功后前方全域${skill.damage ?? 15}伤害（冷却${skill.cooldown ?? 6}s）`;
   }
   if (skill.type === "verdant-revival") {
-    return "被动：濒死复苏20%生命并眩晕敌方3s（每局1次）";
+    const charges = player?.lingmuRevivesRemaining ?? (player?.characterConstellationLevel >= 6 ? 2 : 1);
+    return `被动：濒死复苏20%生命并眩晕敌方3s（剩余${charges}次）`;
   }
   if (skill.type === "shadow-cloak") {
-    return "隐身1.5s并免疫非附加伤害（冷却6s）";
+    return `隐身${skill.duration ?? 1.5}s并免疫非附加伤害（冷却${skill.cooldown ?? 6}s）`;
   }
   return "无";
 }
