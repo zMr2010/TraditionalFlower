@@ -404,7 +404,7 @@ function getBannerIndexForKey(dateKey) {
   const currentDate = new Date(year, Math.max(0, month - 1), Math.max(1, day));
   const epoch = new Date(2026, 0, 1);
   const days = Math.floor((currentDate - epoch) / 86400000);
-  const total = GAME_DATA.characters.length || 1;
+  const total = GAME_DATA.characters.length || 1;   
   return ((days % total) + total) % total;
 }
 
