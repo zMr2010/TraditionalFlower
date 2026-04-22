@@ -409,7 +409,7 @@ function getBannerIndexForKey(dateKey) {
 }
 
 function getBannerCharacterByKey(dateKey = getLocalDateKey()) {
-  return GAME_DATA.characters[0] ?? GAME_DATA.characters[0];
+  return GAME_DATA.characters[getBannerIndexForKey(dateKey)] ?? GAME_DATA.characters[0];
 }
 
 function createEmptyAccountDb() {
