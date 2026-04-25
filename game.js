@@ -203,7 +203,7 @@ const CONSTELLATION_DATA = {
     "移速 +2%",
     "蓄力时间 -1s",
     "火幕命中敌人时立刻刷新技能冷却",
-    "蓄力时间 +2s",
+    "蓄力时间 +2s，伤害 +5，蓄力受伤时每 2s 随机回复 0~5 点生命",
     "蓄力期间可移动",
     "蓄力不再因击退累计而中断"
   ],
@@ -211,7 +211,7 @@ const CONSTELLATION_DATA = {
     "移速 +2%",
     "每 10s 触发一次：造成伤害时随机回复 0~10 点生命",
     "血量上限 +5",
-    "移速再 +1%，受伤后随机回复 0~5 点生命",
+    "移速再 +1%，受伤后每 15s 随机回复 0~5 点生命",
     "移速 -4%",
     "复活次数 +1，触发复活后留下治疗图腾"
   ]
@@ -302,8 +302,11 @@ function createPlayer(side, x) {
     lingmuReviveUsed: false,
     lingmuRevivesRemaining: 1,
     lingmuLifeBurstReadyAt: 0,
+    lingmuDamageHealReadyAt: 0,
     invisibleUntil: 0,
     shadowPerfectStrikeReady: false,
+    shadowPerfectStrikeTrail: null,
+    chiyanChargeHealReadyAt: 0,
     qinglanCooldownResetReadyAt: 0,
     characterConstellationLevel: 0,
     vulnerableUntil: 0,
@@ -1820,6 +1823,9 @@ function updatePlayerMovement(player, dt, now, combatEnabled) {
     } else {
       player.vx = approach(player.vx, 0, tuning.friction * dt * 1.2);
     }
+    if (canAct) {
+      tryHandlePlayerJump(player);
+    }
     if (combatEnabled) {
       handleCharacterSkillInput(player, now, canAct);
     }
@@ -1831,17 +1837,7 @@ function updatePlayerMovement(player, dt, now, combatEnabled) {
       player.vx = approach(player.vx, 0, tuning.friction * dt);
     }
 
-    const canJump = player.onGround || player.jumpCount < player.maxJumps;
-    if (isPressed(player.controls.jump) && canJump && !player.jumpLocked) {
-      const wasOnGround = player.onGround;
-      player.vy = -getJumpVelocity();
-      player.onGround = false;
-      if (wasOnGround) {
-        player.jumpCount = 1;
-      } else {
-        player.jumpCount += 1;
-      }
-    }
+    tryHandlePlayerJump(player);
 
     if (combatEnabled) {
       const dashPressed = isPressed(player.controls.dash) || (player.controls.dashAlt && isPressed(player.controls.dashAlt));
@@ -1892,6 +1888,21 @@ function updatePlayerMovement(player, dt, now, combatEnabled) {
     player.jumpCount = 0;
   } else {
     player.onGround = false;
+  }
+}
+
+function tryHandlePlayerJump(player) {
+  const canJump = player.onGround || player.jumpCount < player.maxJumps;
+  if (!isPressed(player.controls.jump) || !canJump || player.jumpLocked) {
+    return;
+  }
+  const wasOnGround = player.onGround;
+  player.vy = -getJumpVelocity();
+  player.onGround = false;
+  if (wasOnGround) {
+    player.jumpCount = 1;
+  } else {
+    player.jumpCount += 1;
   }
 }
 
@@ -1983,10 +1994,16 @@ function executeShadowPerfectStrike(player, now) {
   player.vx = 0;
   player.vy = 0;
   player.shadowPerfectStrikeReady = false;
+  player.shadowPerfectStrikeTrail = {
+    startX,
+    endX,
+    y: centerY,
+    createdAt: now,
+    expiresAt: now + 0.24
+  };
   const healAmount = Math.min(player.maxHp, player.hp + 10) - player.hp;
   player.hp += healAmount;
   showTip(hitAny ? `${player.id} 发动完美隐身突进` : `${player.id} 释放隐身突进`);
-  void now;
 }
 
 function tryTriggerPerfectShadowCloak(player, now) {
@@ -2752,16 +2769,31 @@ function triggerOwnerDamagePassives(owner, actualDamage) {
   }
 }
 
-function triggerVictimDamagePassives(player) {
-  if (!player || player.hp <= 0) {
+function triggerTimedRandomHeal(player, maxHeal, cooldownSeconds, readyAtKey, label) {
+  if (!player) {
+    return;
+  }
+  const now = game.now;
+  if (now < (player[readyAtKey] ?? 0)) {
+    return;
+  }
+  player[readyAtKey] = now + cooldownSeconds;
+  const heal = randomInt(0, maxHeal);
+  const prevHp = player.hp;
+  player.hp = Math.min(player.maxHp, player.hp + heal);
+  const actualHeal = Math.max(0, player.hp - prevHp);
+  showTip(`${player.id} 的${label}回复了 ${actualHeal} 点生命`);
+}
+
+function triggerVictimDamagePassives(player, actualDamage = 0) {
+  if (!player || actualDamage <= 0) {
     return;
   }
   if (player.character?.id === "ling-mu" && player.characterConstellationLevel >= 4) {
-    const heal = randomInt(0, 5);
-    if (heal > 0) {
-      player.hp = Math.min(player.maxHp, player.hp + heal);
-      showTip(`${player.id} 的灵木 4 命回复了 ${heal} 点生命`);
-    }
+    triggerTimedRandomHeal(player, 5, 15, "lingmuDamageHealReadyAt", "灵木 4 命");
+  }
+  if (player.character?.id === "chi-yan" && player.characterConstellationLevel >= 4 && player.chiyanCharge?.active) {
+    triggerTimedRandomHeal(player, 5, 2, "chiyanChargeHealReadyAt", "炽焰 4 命");
   }
 }
 
@@ -2799,7 +2831,7 @@ function applyHitToPlayer(player, damage, stun, knockbackX, knockbackMultiplier 
   player.vx += knockbackX;
   player.stunnedUntil = Math.max(player.stunnedUntil, game.now + stun);
   addChiyanChargeKnockback(player, knockbackMultiplier);
-  triggerVictimDamagePassives(player);
+  triggerVictimDamagePassives(player, actualDamage);
   triggerOwnerDamagePassives(owner, actualDamage);
   tryTriggerLingmuRevive(player);
   return true;
@@ -3040,6 +3072,10 @@ function updateTimedEffects(now) {
     if (player.hp <= 0) {
       player.windMark = null;
       cancelChiyanCharge(player, false);
+      player.shadowPerfectStrikeTrail = null;
+    }
+    if (player.shadowPerfectStrikeTrail && now >= player.shadowPerfectStrikeTrail.expiresAt) {
+      player.shadowPerfectStrikeTrail = null;
     }
     tickPoisonDamage(player, now);
     getBindLayerCount(player, now);
@@ -3067,9 +3103,10 @@ function tickPoisonDamage(target, now) {
 
   while (now >= target.poisonTickAt) {
     const damage = target.poisonStacks.length * sand.poisonDamagePerStack + getIncomingDamageBonus(target, now);
+    const actualDamage = Math.min(target.hp, damage);
     target.hp = Math.max(0, target.hp - damage);
     if (target.side) {
-      triggerVictimDamagePassives(target);
+      triggerVictimDamagePassives(target, actualDamage);
       tryTriggerLingmuRevive(target);
     }
     target.poisonTickAt += sand.poisonTickInterval;
@@ -3615,8 +3652,11 @@ function applyCharacterConstellationSetup(player) {
   player.staticMoveMultiplier = 1;
   player.dashDamageOverride = null;
   player.shadowPerfectStrikeReady = false;
+  player.shadowPerfectStrikeTrail = null;
   player.qinglanCooldownResetReadyAt = 0;
   player.lingmuLifeBurstReadyAt = 0;
+  player.lingmuDamageHealReadyAt = 0;
+  player.chiyanChargeHealReadyAt = 0;
   player.lingmuRevivesRemaining = 1;
 
   if (!character) {
@@ -3644,6 +3684,7 @@ function applyCharacterConstellationSetup(player) {
       }
       if (level >= 4) {
         chargeSeconds += 2;
+        player.runtimeCharacterSkill.damage = (player.runtimeCharacterSkill.damage ?? 15) + 5;
       }
       player.runtimeCharacterSkill.chargeSeconds = Math.max(0.5, chargeSeconds);
     }
@@ -3715,9 +3756,12 @@ function preparePlayerForBattle(player) {
   player.chiyanCharge.startedAt = 0;
   player.chiyanCharge.breakAccum = 0;
   player.lingmuReviveUsed = false;
+  player.lingmuDamageHealReadyAt = 0;
+  player.chiyanChargeHealReadyAt = 0;
   player.vulnerableUntil = 0;
   player.vulnerableBonus = 0;
   player.invisibleUntil = 0;
+  player.shadowPerfectStrikeTrail = null;
   player.portalTouch = null;
 }
 
@@ -3885,10 +3929,16 @@ function resetToStart() {
   p2.lingmuRevivesRemaining = 1;
   p1.lingmuLifeBurstReadyAt = 0;
   p2.lingmuLifeBurstReadyAt = 0;
+  p1.lingmuDamageHealReadyAt = 0;
+  p2.lingmuDamageHealReadyAt = 0;
   p1.invisibleUntil = 0;
   p2.invisibleUntil = 0;
   p1.shadowPerfectStrikeReady = false;
   p2.shadowPerfectStrikeReady = false;
+  p1.shadowPerfectStrikeTrail = null;
+  p2.shadowPerfectStrikeTrail = null;
+  p1.chiyanChargeHealReadyAt = 0;
+  p2.chiyanChargeHealReadyAt = 0;
   p1.qinglanCooldownResetReadyAt = 0;
   p2.qinglanCooldownResetReadyAt = 0;
   p1.characterConstellationLevel = 0;
@@ -3939,6 +3989,7 @@ function render(now) {
 
   drawWindMarks(now);
   drawFireCurtains(now);
+  drawShadowPerfectStrikeTrails(now);
   for (const projectile of game.projectiles) {
     drawProjectile(projectile);
   }
@@ -4102,6 +4153,35 @@ function drawFireCurtains(now) {
     ctx.beginPath();
     ctx.moveTo(effect.centerX, 0);
     ctx.lineTo(effect.centerX, getGroundY());
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+function drawShadowPerfectStrikeTrails(now) {
+  for (const player of game.players) {
+    const trail = player.shadowPerfectStrikeTrail;
+    if (!trail) {
+      continue;
+    }
+    if (now >= trail.expiresAt) {
+      player.shadowPerfectStrikeTrail = null;
+      continue;
+    }
+    const lifeRate = clamp((trail.expiresAt - now) / Math.max(0.001, trail.expiresAt - trail.createdAt), 0, 1);
+    ctx.save();
+    ctx.lineCap = "round";
+    ctx.strokeStyle = `rgba(255, 255, 255, ${(0.16 + lifeRate * 0.16).toFixed(3)})`;
+    ctx.lineWidth = 9;
+    ctx.beginPath();
+    ctx.moveTo(trail.startX, trail.y);
+    ctx.lineTo(trail.endX, trail.y);
+    ctx.stroke();
+    ctx.strokeStyle = `rgba(255, 255, 255, ${(0.34 + lifeRate * 0.3).toFixed(3)})`;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(trail.startX, trail.y);
+    ctx.lineTo(trail.endX, trail.y);
     ctx.stroke();
     ctx.restore();
   }
