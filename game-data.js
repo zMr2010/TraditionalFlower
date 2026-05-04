@@ -111,6 +111,38 @@
         跳跃: "二段跳",
         冲撞效果: "较弱"
       }
+    },
+    {
+      id: "burning-blade",
+      name: "燃命之刃",
+      sprite: {
+        p1: "Images/Character/1p.svg",
+        p2: "Images/Character/2P.svg",
+        c2: "Images/Character/3P.svg"
+      },
+      description: "高移速爆发角色，以血换取高跃落刃，承伤会被放大。",
+      baseHp: 100,
+      moveSpeedMultiplier: 1.2,
+      dashDamageBase: 3,
+      incomingDamageMultiplier: 2,
+      characterSkill: {
+        type: "burning-blade",
+        cooldown: 20,
+        selfHpRatio: 0.5,
+        leapHeightRatio: 0.5,
+        bladeLengthRatio: 0.25,
+        bladeDamageHpRatio: 0.05,
+        bladeTravelDistanceRatio: 0.22,
+        bladeTravelSeconds: 0.38,
+        bladeSpawnOffsetRatio: 0.72,
+        bladeCurve: 48
+      },
+      stats: {
+        生命: 100,
+        移速倍率: "1.20x",
+        冲撞伤害: "3",
+        承伤: "2x"
+      }
     }
   ],
   weapons: [
@@ -277,11 +309,11 @@
       id: "sand-talisman",
       name: "飞沙符",
       icon: "Images/Weapon/sand.svg",
-      description: "命中后附加中毒和沙尘满目，并强化己方机动。",
+      description: "命中后附加中毒与沙尘满目，但不再改变双方移速。",
       stats: {
         冷却: "1 秒",
-        中毒: "10 秒，每秒 1 点，可叠加",
-        特性: "沙尘遮蔽 + 己方加速 + 敌方减速"
+        中毒: "10 秒，每 2 秒 1 点，可叠加",
+        特性: "沙尘遮蔽，无加速与减速"
       },
       skill: {
         type: "sand",
@@ -379,10 +411,10 @@
   effects: {
     sand: {
       poisonDuration: 10,
-      poisonTickInterval: 1,
+      poisonTickInterval: 2,
       poisonDamagePerStack: 1,
-      speedBuffMultiplier: 1.2,
-      speedDebuffMultiplier: 0.8,
+      speedBuffMultiplier: 1,
+      speedDebuffMultiplier: 1,
       speedEffectDuration: 10,
       stormDuration: 10
     },

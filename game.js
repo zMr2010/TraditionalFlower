@@ -117,6 +117,7 @@ const game = {
   webZones: [],
   sandstorms: [],
   fireCurtains: [],
+  flamebornBlades: [],
   healingTotems: [],
   boss: null,
   selection: {
@@ -214,6 +215,14 @@ const CONSTELLATION_DATA = {
     "移速再 +1%，受伤后每 15s 随机回复 0~5 点生命",
     "移速 -4%",
     "复活次数 +1，触发复活后留下治疗图腾"
+  ],
+  "burning-blade": [
+    "血量上限 +20%",
+    "冲撞伤害 +2，获得特殊皮肤“泣血之刃”",
+    "释放技能时眩晕敌方 3s",
+    "血量上限再 +10%",
+    "血量高于 50% 时承伤提升至 3 倍",
+    "若技能消耗或回复超过 30% 血量，5s 内武器命中附加上限 2% 伤害并回复上限 1% 生命"
   ]
 };
 const CHARACTER_NAME_BY_ID = Object.fromEntries(GAME_DATA.characters.map((character) => [character.id, character.name]));
@@ -276,6 +285,7 @@ function createPlayer(side, x) {
     jumpLocked: false,
     maxJumps: 1,
     jumpCount: 0,
+    incomingDamageMultiplier: 1,
     dashDamageMultiplier: 1,
     dashKnockbackMultiplier: 1,
     dashDamageOverride: null,
@@ -299,6 +309,8 @@ function createPlayer(side, x) {
       startedAt: 0,
       breakAccum: 0
     },
+    flamebornLeapActive: false,
+    burningBladeWeaponBuffUntil: 0,
     lingmuReviveUsed: false,
     lingmuRevivesRemaining: 1,
     lingmuLifeBurstReadyAt: 0,
@@ -346,10 +358,24 @@ function getGroundY() {
   return HEIGHT * GAME_DATA.tuning.groundHeightRatio;
 }
 
-function getJumpVelocity() {
+function getJumpVelocityForHeight(height) {
   const gravity = GAME_DATA.tuning.gravity;
+  return Math.sqrt(2 * gravity * Math.max(0, height));
+}
+
+function getJumpVelocity() {
   const jumpHeight = HEIGHT * GAME_DATA.tuning.jumpHeightRatio;
-  return Math.sqrt(2 * gravity * jumpHeight);
+  return getJumpVelocityForHeight(jumpHeight);
+}
+
+function getPlayerSpritePath(player) {
+  if (!player?.character) {
+    return "";
+  }
+  if (player.character.id === "burning-blade" && (player.characterConstellationLevel ?? 0) >= 2 && player.character.sprite?.c2) {
+    return player.character.sprite.c2;
+  }
+  return player.side === "p1" ? player.character.sprite.p1 : player.character.sprite.p2;
 }
 
 function preloadAssets() {
@@ -361,8 +387,11 @@ function preloadAssets() {
   ]);
 
   for (const character of GAME_DATA.characters) {
-    allSources.add(character.sprite.p1);
-    allSources.add(character.sprite.p2);
+    for (const src of Object.values(character.sprite ?? {})) {
+      if (typeof src === "string" && src.length > 0) {
+        allSources.add(src);
+      }
+    }
   }
 
   for (const weapon of GAME_DATA.weapons) {
@@ -1812,10 +1841,13 @@ function updatePlayerMovement(player, dt, now, combatEnabled) {
   const right = keysDown.has(player.controls.right);
   const move = (left ? -1 : 0) + (right ? 1 : 0);
   const isCharging = player.chiyanCharge?.active;
+  const isFlamebornLeaping = player.flamebornLeapActive;
   const canAct = !isStunned && player.hp > 0;
   const moveSpeed = getEffectiveMoveSpeed(player, now);
 
-  if (isCharging) {
+  if (isFlamebornLeaping) {
+    player.vx = approach(player.vx, 0, tuning.friction * dt);
+  } else if (isCharging) {
     const canMoveWhileCharging = player.character?.id === "chi-yan" && player.characterConstellationLevel >= 5 && canAct;
     if (canMoveWhileCharging && move !== 0) {
       player.facing = move;
@@ -1886,6 +1918,9 @@ function updatePlayerMovement(player, dt, now, combatEnabled) {
     player.vy = 0;
     player.onGround = true;
     player.jumpCount = 0;
+    if (player.flamebornLeapActive) {
+      resolveBurningBladeLanding(player, now);
+    }
   } else {
     player.onGround = false;
   }
@@ -1908,7 +1943,7 @@ function tryHandlePlayerJump(player) {
 
 function tryDash(player, now) {
   const tuning = GAME_DATA.tuning;
-  if (player.chiyanCharge?.active) {
+  if (player.chiyanCharge?.active || player.flamebornLeapActive) {
     return;
   }
   if (player.dashUntil > now || now < player.stunnedUntil || player.hp <= 0) {
@@ -1926,7 +1961,7 @@ function tryDash(player, now) {
 }
 
 function tryCastWeaponSkill(player, now) {
-  if (player.chiyanCharge?.active) {
+  if (player.chiyanCharge?.active || player.flamebornLeapActive) {
     return;
   }
   if (now < player.stunnedUntil || player.hp <= 0) {
@@ -2330,6 +2365,11 @@ function tryCastCharacterSkill(player, skill, now) {
     return;
   }
 
+  if (skill.type === "burning-blade") {
+    castBurningBladeSkill(player, skill, now);
+    return;
+  }
+
   if (skill.type === "shadow-cloak") {
     player.invisibleUntil = Math.max(player.invisibleUntil, now + (skill.duration ?? 1.5));
     player.characterSkillReadyAt = now + (skill.cooldown ?? 6);
@@ -2445,6 +2485,96 @@ function castChiyanFlameCurtain(player, skill, now) {
     player.characterSkillReadyAt = now;
   }
   showTip(`${player.id} 释放火幕`);
+}
+
+function castBurningBladeSkill(player, skill, now) {
+  const targetHp = Math.max(1, Math.round(player.maxHp * (skill.selfHpRatio ?? 0.5)));
+  player.hp = targetHp;
+  player.characterSkillReadyAt = now + (skill.cooldown ?? 20);
+  player.flamebornLeapActive = true;
+  player.dashUntil = 0;
+  player.dashRecoverAt = 0;
+  player.dashCooldownUntil = 0;
+  player.dashRecoveryPending = false;
+  player.dashHitMarks.clear();
+  player.vx = 0;
+  player.vy = -getJumpVelocityForHeight(HEIGHT * (skill.leapHeightRatio ?? 0.5));
+  player.onGround = false;
+  player.jumpCount = player.maxJumps;
+  showTip(`${player.id} 燃命跃起`);
+}
+
+function resolveBurningBladeLanding(player, now) {
+  if (!player.flamebornLeapActive) {
+    return;
+  }
+  const skill = getCharacterSkillConfig(player);
+  player.flamebornLeapActive = false;
+  if (!skill || skill.type !== "burning-blade" || player.hp <= 0) {
+    return;
+  }
+  spawnBurningBladeVolley(player, skill, now);
+  showTip(`${player.id} 射出燃命风刃`);
+}
+
+function spawnBurningBladeVolley(player, skill, now) {
+  const centerX = player.x + player.w / 2;
+  const centerY = player.y + player.h * 0.5;
+  const length = WIDTH * (skill.bladeLengthRatio ?? 0.25);
+  const damage = Math.max(1, Math.round(player.maxHp * (skill.bladeDamageHpRatio ?? 0.05)));
+  const travelSeconds = Math.max(0.16, skill.bladeTravelSeconds ?? 0.38);
+  const travelDistance = WIDTH * (skill.bladeTravelDistanceRatio ?? 0.22);
+  const speed = travelDistance / travelSeconds;
+  const spawnOffset = (skill.bladeSpawnOffsetRatio ?? 0.72) * Math.min(player.w, player.h) * 0.5;
+  const curve = skill.bladeCurve ?? 48;
+  const blades = [
+    {
+      direction: "left",
+      axis: "vertical",
+      x: centerX - spawnOffset,
+      y: centerY,
+      vx: -speed,
+      vy: 0
+    },
+    {
+      direction: "up",
+      axis: "horizontal",
+      x: centerX,
+      y: player.y - spawnOffset * 0.55,
+      vx: 0,
+      vy: -speed
+    },
+    {
+      direction: "right",
+      axis: "vertical",
+      x: centerX + spawnOffset,
+      y: centerY,
+      vx: speed,
+      vy: 0
+    }
+  ];
+
+  blades.forEach((blade) => {
+    game.flamebornBlades.push({
+      id: `burning-blade-${Math.random().toString(36).slice(2, 9)}`,
+      ownerId: player.id,
+      direction: blade.direction,
+      axis: blade.axis,
+      x: blade.x,
+      y: blade.y,
+      prevX: blade.x,
+      prevY: blade.y,
+      vx: blade.vx,
+      vy: blade.vy,
+      length,
+      thickness: 34,
+      curve,
+      damage,
+      createdAt: now,
+      updatedAt: now,
+      expired: false
+    });
+  });
 }
 
 function getEnemyUnits(player) {
@@ -2684,6 +2814,17 @@ function getDashDamageValue(player) {
   return Math.max(1, Math.round(GAME_DATA.tuning.dashDamage * (player.dashDamageMultiplier ?? 1)));
 }
 
+function getIncomingDamageMultiplier(target) {
+  if (!target) {
+    return 1;
+  }
+  let multiplier = Math.max(0, target.incomingDamageMultiplier ?? 1);
+  if (target.character?.id === "burning-blade" && (target.characterConstellationLevel ?? 0) >= 5 && target.hp > target.maxHp * 0.5) {
+    multiplier = Math.max(multiplier, 3);
+  }
+  return multiplier;
+}
+
 function resolveDashHit(attacker, defender, now) {
   if (attacker.hp <= 0 || defender.hp <= 0) {
     return;
@@ -2755,6 +2896,14 @@ function getIncomingDamageBonus(target, now = game.now) {
   return 0;
 }
 
+function getAdjustedIncomingDamage(target, damage, now = game.now) {
+  if (!target) {
+    return 0;
+  }
+  const scaled = Math.max(0, damage + getIncomingDamageBonus(target, now)) * Math.max(0, target.incomingDamageMultiplier ?? 1);
+  return Math.max(0, Math.round(scaled));
+}
+
 function triggerOwnerDamagePassives(owner, actualDamage) {
   if (!owner || owner.id === "BOSS" || actualDamage <= 0 || owner.hp <= 0) {
     return;
@@ -2822,7 +2971,7 @@ function applyHitToPlayer(player, damage, stun, knockbackX, knockbackMultiplier 
   if (isShadowCloakActive(player)) {
     return false;
   }
-  const totalDamage = Math.max(0, damage + getIncomingDamageBonus(player));
+  const totalDamage = getAdjustedIncomingDamage(player, damage);
   if (totalDamage <= 0) {
     return false;
   }
@@ -3063,15 +3212,90 @@ function updateHealingTotems(now) {
   }
 }
 
+function updateFlamebornBlades(now) {
+  game.flamebornBlades = game.flamebornBlades.filter((blade) => {
+    if (now < blade.createdAt) {
+      return true;
+    }
+    if (blade.expired) {
+      return false;
+    }
+    const lastUpdatedAt = blade.updatedAt ?? blade.createdAt;
+    const dt = Math.max(0, Math.min(0.05, now - lastUpdatedAt));
+    blade.prevX = blade.x;
+    blade.prevY = blade.y;
+    if (dt > 0) {
+      blade.x += blade.vx * dt;
+      blade.y += blade.vy * dt;
+      blade.updatedAt = now;
+      blade.expired = resolveFlamebornBladeHits(blade) || doesFlamebornBladeTouchBoundary(blade);
+    }
+    return !blade.expired;
+  });
+}
+
+function resolveFlamebornBladeHits(blade) {
+  const owner = findActorById(blade.ownerId);
+  if (!owner) {
+    return false;
+  }
+  for (const target of getEnemyUnits(owner)) {
+    if (!target || target.hp <= 0) {
+      continue;
+    }
+    if (!isTargetHitByFlamebornBlade(blade, target)) {
+      continue;
+    }
+    const knockback = blade.direction === "left" ? -180 : blade.direction === "right" ? 180 : 0;
+    if (target.id === "BOSS") {
+      applyDamageToBoss(target, blade.damage, knockback, owner);
+    } else {
+      applyHitToPlayer(target, blade.damage, 0, knockback, 1, owner);
+    }
+    return true;
+  }
+  return false;
+}
+
+function isTargetHitByFlamebornBlade(blade, target) {
+  const circle = getEntityHitCircle(target);
+  const thickness = (blade.thickness ?? 34) + circle.radius;
+  if (blade.axis === "vertical") {
+    const minX = Math.min(blade.prevX ?? blade.x, blade.x) - thickness;
+    const maxX = Math.max(blade.prevX ?? blade.x, blade.x) + thickness;
+    const minY = blade.y - blade.length * 0.5 - thickness;
+    const maxY = blade.y + blade.length * 0.5 + thickness;
+    return circle.x >= minX && circle.x <= maxX && circle.y >= minY && circle.y <= maxY;
+  }
+  const minX = blade.x - blade.length * 0.5 - thickness;
+  const maxX = blade.x + blade.length * 0.5 + thickness;
+  const minY = Math.min(blade.prevY ?? blade.y, blade.y) - thickness;
+  const maxY = Math.max(blade.prevY ?? blade.y, blade.y) + thickness;
+  return circle.x >= minX && circle.x <= maxX && circle.y >= minY && circle.y <= maxY;
+}
+
+function doesFlamebornBladeTouchBoundary(blade) {
+  const thickness = blade.thickness ?? 34;
+  if (blade.direction === "left") {
+    return blade.x - thickness <= 0;
+  }
+  if (blade.direction === "right") {
+    return blade.x + thickness >= WIDTH;
+  }
+  return blade.y - thickness <= 0;
+}
+
 function updateTimedEffects(now) {
   game.sandstorms = game.sandstorms.filter((storm) => now < storm.expiresAt);
   game.fireCurtains = game.fireCurtains.filter((effect) => now < effect.expiresAt);
   updateHealingTotems(now);
+  updateFlamebornBlades(now);
 
   for (const player of game.players) {
     if (player.hp <= 0) {
       player.windMark = null;
       cancelChiyanCharge(player, false);
+      player.flamebornLeapActive = false;
       player.shadowPerfectStrikeTrail = null;
     }
     if (player.shadowPerfectStrikeTrail && now >= player.shadowPerfectStrikeTrail.expiresAt) {
@@ -3102,7 +3326,7 @@ function tickPoisonDamage(target, now) {
   }
 
   while (now >= target.poisonTickAt) {
-    const damage = target.poisonStacks.length * sand.poisonDamagePerStack + getIncomingDamageBonus(target, now);
+    const damage = getAdjustedIncomingDamage(target, target.poisonStacks.length * sand.poisonDamagePerStack, now);
     const actualDamage = Math.min(target.hp, damage);
     target.hp = Math.max(0, target.hp - damage);
     if (target.side) {
@@ -3346,6 +3570,12 @@ function updatePlayerSkillHud(player, weaponFill, weaponText, characterFill, cha
   if (player.shadowPerfectStrikeReady) {
     characterFill.style.width = "100%";
     characterText.textContent = "角色: 完隐待发";
+    return;
+  }
+
+  if (characterSkill.type === "burning-blade" && player.flamebornLeapActive) {
+    characterFill.style.width = "100%";
+    characterText.textContent = "角色: 腾跃中";
     return;
   }
 
@@ -3626,6 +3856,7 @@ function enterBattle() {
   game.webZones.length = 0;
   game.sandstorms.length = 0;
   game.fireCurtains.length = 0;
+  game.flamebornBlades.length = 0;
   game.healingTotems.length = 0;
   game.phase = PHASE.BATTLE;
   game.isPaused = false;
@@ -3650,9 +3881,11 @@ function applyCharacterConstellationSetup(player) {
   player.characterConstellationLevel = level;
   player.runtimeCharacterSkill = baseSkill;
   player.staticMoveMultiplier = 1;
-  player.dashDamageOverride = null;
+  player.incomingDamageMultiplier = character?.incomingDamageMultiplier ?? 1;
+  player.dashDamageOverride = character?.dashDamageOverride ?? null;
   player.shadowPerfectStrikeReady = false;
   player.shadowPerfectStrikeTrail = null;
+  player.flamebornLeapActive = false;
   player.qinglanCooldownResetReadyAt = 0;
   player.lingmuLifeBurstReadyAt = 0;
   player.lingmuDamageHealReadyAt = 0;
@@ -3720,6 +3953,7 @@ function preparePlayerForBattle(player) {
   player.baseMoveSpeedMultiplier = player.character?.moveSpeedMultiplier ?? 1;
   player.maxJumps = player.character?.maxJumps ?? 1;
   player.jumpCount = 0;
+  player.incomingDamageMultiplier = player.character?.incomingDamageMultiplier ?? 1;
   player.dashDamageMultiplier = player.character?.dashDamageMultiplier ?? 1;
   player.dashKnockbackMultiplier = player.character?.dashKnockbackMultiplier ?? 1;
   applyCharacterConstellationSetup(player);
@@ -3755,6 +3989,7 @@ function preparePlayerForBattle(player) {
   player.chiyanCharge.active = false;
   player.chiyanCharge.startedAt = 0;
   player.chiyanCharge.breakAccum = 0;
+  player.flamebornLeapActive = false;
   player.lingmuReviveUsed = false;
   player.lingmuDamageHealReadyAt = 0;
   player.chiyanChargeHealReadyAt = 0;
@@ -3834,6 +4069,7 @@ function resetToStart() {
   game.webZones.length = 0;
   game.sandstorms.length = 0;
   game.fireCurtains.length = 0;
+  game.flamebornBlades.length = 0;
   game.healingTotems.length = 0;
   game.boss = null;
   game.portals = createPortals();
@@ -3877,6 +4113,8 @@ function resetToStart() {
   p2.maxJumps = 1;
   p1.jumpCount = 0;
   p2.jumpCount = 0;
+  p1.incomingDamageMultiplier = 1;
+  p2.incomingDamageMultiplier = 1;
   p1.dashDamageMultiplier = 1;
   p2.dashDamageMultiplier = 1;
   p1.dashKnockbackMultiplier = 1;
@@ -3923,6 +4161,8 @@ function resetToStart() {
   p2.chiyanCharge.startedAt = 0;
   p1.chiyanCharge.breakAccum = 0;
   p2.chiyanCharge.breakAccum = 0;
+  p1.flamebornLeapActive = false;
+  p2.flamebornLeapActive = false;
   p1.lingmuReviveUsed = false;
   p2.lingmuReviveUsed = false;
   p1.lingmuRevivesRemaining = 1;
@@ -3990,6 +4230,7 @@ function render(now) {
   drawWindMarks(now);
   drawFireCurtains(now);
   drawShadowPerfectStrikeTrails(now);
+  drawFlamebornBlades(now);
   for (const projectile of game.projectiles) {
     drawProjectile(projectile);
   }
@@ -4187,6 +4428,65 @@ function drawShadowPerfectStrikeTrails(now) {
   }
 }
 
+function drawFlamebornBlades(now) {
+  for (const blade of game.flamebornBlades) {
+    if (now < blade.createdAt) {
+      continue;
+    }
+    const age = Math.max(0, now - blade.createdAt);
+    const pulse = 0.5 + 0.5 * Math.sin(age * 10);
+    const alpha = 0.72 + pulse * 0.16;
+    const glowAlpha = 0.18 + pulse * 0.08;
+    const currentX = blade.x;
+    const currentY = blade.y;
+    const curve = blade.curve ?? 48;
+
+    ctx.save();
+    ctx.lineCap = "round";
+    ctx.strokeStyle = `rgba(112, 243, 255, ${alpha.toFixed(3)})`;
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    if (blade.axis === "horizontal") {
+      ctx.moveTo(currentX - blade.length * 0.5, currentY);
+      ctx.quadraticCurveTo(currentX, currentY - curve, currentX + blade.length * 0.5, currentY);
+    } else {
+      const bendX = blade.direction === "left" ? currentX - curve : currentX + curve;
+      ctx.moveTo(currentX, currentY - blade.length * 0.5);
+      ctx.quadraticCurveTo(bendX, currentY, currentX, currentY + blade.length * 0.5);
+    }
+    ctx.stroke();
+    ctx.strokeStyle = `rgba(218, 253, 255, ${(alpha * 0.82).toFixed(3)})`;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    if (blade.axis === "horizontal") {
+      ctx.moveTo(currentX - blade.length * 0.38, currentY + 8);
+      ctx.quadraticCurveTo(currentX, currentY - curve * 0.44, currentX + blade.length * 0.38, currentY + 8);
+    } else {
+      const bendX = blade.direction === "left" ? currentX - curve * 0.56 : currentX + curve * 0.56;
+      ctx.moveTo(currentX + (blade.direction === "left" ? 6 : -6), currentY - blade.length * 0.36);
+      ctx.quadraticCurveTo(bendX, currentY, currentX + (blade.direction === "left" ? 6 : -6), currentY + blade.length * 0.36);
+    }
+    ctx.stroke();
+
+    ctx.strokeStyle = `rgba(125, 238, 255, ${(0.18 + pulse * 0.1).toFixed(3)})`;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(blade.prevX ?? currentX, blade.prevY ?? currentY);
+    ctx.lineTo(currentX, currentY);
+    ctx.stroke();
+
+    ctx.fillStyle = `rgba(108, 242, 255, ${glowAlpha.toFixed(3)})`;
+    ctx.beginPath();
+    if (blade.axis === "horizontal") {
+      ctx.ellipse(currentX, currentY, blade.length * 0.32, 20, 0, 0, Math.PI * 2);
+    } else {
+      ctx.ellipse(currentX, currentY, 20, blade.length * 0.32, 0, 0, Math.PI * 2);
+    }
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
 function drawPlayer(player, now) {
   const spritePath = player.side === "p1" ? player.character.sprite.p1 : player.character.sprite.p2;
   const image = getImage(spritePath);
@@ -4246,7 +4546,7 @@ function drawPlayer(player, now) {
   ctx.textAlign = "center";
   ctx.fillText(player.id, drawX + player.w / 2, drawY + player.h + 18);
 
-  if (invisible || player.chiyanCharge?.active || player.shadowPerfectStrikeReady) {
+  if (invisible || player.chiyanCharge?.active || player.shadowPerfectStrikeReady || player.flamebornLeapActive) {
     const labels = [];
     if (invisible) {
       labels.push("隐身");
@@ -4256,6 +4556,9 @@ function drawPlayer(player, now) {
     }
     if (player.shadowPerfectStrikeReady) {
       labels.push("完隐");
+    }
+    if (player.flamebornLeapActive) {
+      labels.push("腾跃");
     }
     ctx.fillStyle = "rgba(237, 243, 255, 0.92)";
     ctx.font = "bold 13px Microsoft YaHei";
@@ -4579,6 +4882,9 @@ function getCharacterHue(characterId) {
   if (characterId === "chi-yan") {
     return 52;
   }
+  if (characterId === "burning-blade") {
+    return 184;
+  }
   if (characterId === "ling-mu") {
     return 118;
   }
@@ -4602,6 +4908,11 @@ function getCharacterSkillPanelText(characterOrPlayer) {
   }
   if (skill.type === "flame-curtain") {
     return `长按蓄力${skill.chargeSeconds ?? 3}s，成功后前方全域${skill.damage ?? 15}伤害（冷却${skill.cooldown ?? 6}s）`;
+  }
+  if (skill.type === "burning-blade") {
+    const hpRatio = Math.round((skill.selfHpRatio ?? 0.5) * 100);
+    const damageRatio = Math.round((skill.bladeDamageHpRatio ?? 0.05) * 100);
+    return `设为${hpRatio}%生命并高跃，落地后向上/左右射出三道风刃，命中敌人或碰到边界才消失，每道造成上限${damageRatio}%伤害（冷却${skill.cooldown ?? 20}s）`;
   }
   if (skill.type === "verdant-revival") {
     const charges = player?.lingmuRevivesRemaining ?? (player?.characterConstellationLevel >= 6 ? 2 : 1);
