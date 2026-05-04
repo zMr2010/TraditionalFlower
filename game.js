@@ -221,7 +221,7 @@ const CONSTELLATION_DATA = {
     "冲撞伤害 +2，获得特殊皮肤“泣血之刃”",
     "释放技能时眩晕敌方 3s",
     "血量上限再 +10%",
-    "血量高于 50% 时承伤提升至 3 倍",
+    "技能冷却降低至 10 秒",
     "若技能消耗或回复超过 30% 血量，5s 内武器命中附加上限 2% 伤害并回复上限 1% 生命"
   ]
 };
@@ -288,6 +288,7 @@ function createPlayer(side, x) {
     incomingDamageMultiplier: 1,
     dashDamageMultiplier: 1,
     dashKnockbackMultiplier: 1,
+    dashDamageBase: GAME_DATA.tuning.dashDamage,
     dashDamageOverride: null,
     dashCharges: GAME_DATA.tuning.dashChargeMax ?? 3,
     dashChargeMax: GAME_DATA.tuning.dashChargeMax ?? 3,
@@ -2201,7 +2202,7 @@ function resolveKunpengDustOrbitHits(player, skill) {
 }
 
 function tryOrbitDustHitPlayer(owner, dust, target, skill) {
-  if (!target || target.hp <= 0) {
+  if (!target || target.hp <= 0 || !hasActiveCollision(target)) {
     return false;
   }
   const circle = getEntityHitCircle(target);
@@ -2209,7 +2210,11 @@ function tryOrbitDustHitPlayer(owner, dust, target, skill) {
     return false;
   }
   const dir = Math.sign(circle.x - dust.x) || owner.facing || 1;
-  return applyHitToPlayer(target, skill.damage ?? 2, 0, dir * 130, 1, owner);
+  const landed = applyHitToPlayer(target, skill.damage ?? 2, 0, dir * 130, 1, owner);
+  if (landed) {
+    tryTriggerWeaponOnHit(skill, owner, target);
+  }
+  return landed;
 }
 
 function tryOrbitDustHitBoss(owner, dust, boss, skill) {
@@ -2221,7 +2226,11 @@ function tryOrbitDustHitBoss(owner, dust, boss, skill) {
     return false;
   }
   const dir = Math.sign(circle.x - dust.x) || owner.facing || 1;
-  return applyDamageToBoss(boss, skill.damage ?? 2, dir * 120, owner);
+  const landed = applyDamageToBoss(boss, skill.damage ?? 2, dir * 120, owner);
+  if (landed) {
+    tryTriggerWeaponOnHit(skill, owner, boss);
+  }
+  return landed;
 }
 
 function fireKunpengDust(player, weapon, skill, now) {
@@ -2489,9 +2498,17 @@ function castChiyanFlameCurtain(player, skill, now) {
 
 function castBurningBladeSkill(player, skill, now) {
   const targetHp = Math.max(1, Math.round(player.maxHp * (skill.selfHpRatio ?? 0.5)));
+  const hpChange = Math.abs((player.hp ?? 0) - targetHp);
+  const triggersWeaponBuff = player.characterConstellationLevel >= 6 && hpChange > player.maxHp * 0.3;
   player.hp = targetHp;
   player.characterSkillReadyAt = now + (skill.cooldown ?? 20);
   player.flamebornLeapActive = true;
+  if (player.characterConstellationLevel >= 3) {
+    stunEnemyUnits(player, 3, now);
+  }
+  if (triggersWeaponBuff) {
+    player.burningBladeWeaponBuffUntil = Math.max(player.burningBladeWeaponBuffUntil ?? 0, now + 5);
+  }
   player.dashUntil = 0;
   player.dashRecoverAt = 0;
   player.dashCooldownUntil = 0;
@@ -2501,7 +2518,19 @@ function castBurningBladeSkill(player, skill, now) {
   player.vy = -getJumpVelocityForHeight(HEIGHT * (skill.leapHeightRatio ?? 0.5));
   player.onGround = false;
   player.jumpCount = player.maxJumps;
-  showTip(`${player.id} 燃命跃起`);
+  showTip(triggersWeaponBuff ? `${player.id} 燃命跃起，武器染血` : `${player.id} 燃命跃起`);
+}
+
+function stunEnemyUnits(player, seconds, now = game.now) {
+  if (!player || seconds <= 0) {
+    return;
+  }
+  for (const target of getEnemyUnits(player)) {
+    if (!target || target.hp <= 0) {
+      continue;
+    }
+    target.stunnedUntil = Math.max(target.stunnedUntil ?? 0, now + seconds);
+  }
 }
 
 function resolveBurningBladeLanding(player, now) {
@@ -2578,11 +2607,12 @@ function spawnBurningBladeVolley(player, skill, now) {
 }
 
 function getEnemyUnits(player) {
+  const canBeTargeted = (unit) => unit && unit.hp > 0 && hasActiveCollision(unit);
   if (game.mode === MODE.PVP) {
-    return [player.id === "P1" ? game.players[1] : game.players[0]];
+    return [player.id === "P1" ? game.players[1] : game.players[0]].filter(canBeTargeted);
   }
   if (game.boss) {
-    return [game.boss];
+    return [game.boss].filter(canBeTargeted);
   }
   return [];
 }
@@ -2653,7 +2683,8 @@ function updateBoss(dt, now) {
     return;
   }
 
-  const target = alivePlayers.reduce((best, player) => {
+  const targetablePlayers = alivePlayers.filter((player) => hasActiveCollision(player, now));
+  const target = targetablePlayers.reduce((best, player) => {
     if (!best) {
       return player;
     }
@@ -2662,22 +2693,18 @@ function updateBoss(dt, now) {
     return distA < distB ? player : best;
   }, null);
 
-  if (!target) {
-    return;
-  }
-
   const bossData = boss.data;
   const bossStunned = now < (boss.stunnedUntil ?? 0);
-  const dx = target.x + target.w / 2 - (boss.x + boss.w / 2);
-  const direction = dx === 0 ? boss.facing : Math.sign(dx);
-  boss.facing = direction;
   const bossSpeedDebuff = now < (boss.speedDebuffUntil ?? 0)
     ? GAME_DATA.effects.sand.speedDebuffMultiplier
     : 1;
   const bossBindMultiplier = getBindMoveMultiplier(boss, now);
-  if (bossStunned) {
+  if (bossStunned || !target) {
     boss.vx = approach(boss.vx, 0, GAME_DATA.tuning.friction * dt * 0.8);
   } else {
+    const dx = target.x + target.w / 2 - (boss.x + boss.w / 2);
+    const direction = dx === 0 ? boss.facing : Math.sign(dx);
+    boss.facing = direction;
     boss.vx = approach(
       boss.vx,
       direction * bossData.moveSpeed * bossSpeedDebuff * bossBindMultiplier * (boss.webSlowMultiplier ?? 1),
@@ -2784,7 +2811,7 @@ function updateProjectiles(dt) {
 }
 
 function tryProjectileHitPlayer(projectile, player) {
-  if (!player || player.hp <= 0) {
+  if (!player || player.hp <= 0 || !hasActiveCollision(player)) {
     return false;
   }
   if (!projectileHitsEntity(projectile, player)) {
@@ -2811,22 +2838,22 @@ function getDashDamageValue(player) {
   if (player.dashDamageOverride != null) {
     return player.dashDamageOverride;
   }
-  return Math.max(1, Math.round(GAME_DATA.tuning.dashDamage * (player.dashDamageMultiplier ?? 1)));
+  const baseDamage = player.dashDamageBase ?? player.character?.dashDamageBase ?? GAME_DATA.tuning.dashDamage;
+  return Math.max(1, Math.round(baseDamage * (player.dashDamageMultiplier ?? 1)));
 }
 
 function getIncomingDamageMultiplier(target) {
   if (!target) {
     return 1;
   }
-  let multiplier = Math.max(0, target.incomingDamageMultiplier ?? 1);
-  if (target.character?.id === "burning-blade" && (target.characterConstellationLevel ?? 0) >= 5 && target.hp > target.maxHp * 0.5) {
-    multiplier = Math.max(multiplier, 3);
-  }
-  return multiplier;
+  return Math.max(0, target.incomingDamageMultiplier ?? 1);
 }
 
 function resolveDashHit(attacker, defender, now) {
   if (attacker.hp <= 0 || defender.hp <= 0) {
+    return;
+  }
+  if (!hasActiveCollision(attacker, now) || !hasActiveCollision(defender, now)) {
     return;
   }
   if (attacker.dashUntil <= now) {
@@ -2847,6 +2874,9 @@ function resolveDashHit(attacker, defender, now) {
 
 function resolveDashHitToBoss(attacker, boss, now) {
   if (!boss || boss.hp <= 0 || attacker.hp <= 0) {
+    return;
+  }
+  if (!hasActiveCollision(attacker, now)) {
     return;
   }
   if (attacker.dashUntil <= now) {
@@ -2870,6 +2900,16 @@ function isShadowCloakActive(player, now = game.now) {
     return false;
   }
   return player.character?.id === "shadow-ninja" && now < (player.invisibleUntil ?? 0);
+}
+
+function hasActiveCollision(entity, now = game.now) {
+  if (!entity || entity.hp <= 0) {
+    return false;
+  }
+  if (entity.side && isShadowCloakActive(entity, now)) {
+    return false;
+  }
+  return true;
 }
 
 function randomInt(min, max) {
@@ -2900,7 +2940,7 @@ function getAdjustedIncomingDamage(target, damage, now = game.now) {
   if (!target) {
     return 0;
   }
-  const scaled = Math.max(0, damage + getIncomingDamageBonus(target, now)) * Math.max(0, target.incomingDamageMultiplier ?? 1);
+  const scaled = Math.max(0, damage + getIncomingDamageBonus(target, now)) * getIncomingDamageMultiplier(target);
   return Math.max(0, Math.round(scaled));
 }
 
@@ -3038,6 +3078,7 @@ function applyProjectileHitToPlayer(projectile, target, owner) {
       owner.speedBuffUntil = Math.max(owner.speedBuffUntil, game.now + sand.speedEffectDuration);
     }
     spawnSandstorm(target, sand.stormDuration);
+    tryTriggerWeaponOnHit(projectile, owner, target);
     showTip(`${target.id} 被飞沙符命中：中毒叠层`);
     return;
   }
@@ -3052,7 +3093,7 @@ function applyProjectileHitToPlayer(projectile, target, owner) {
     owner
   );
   if (landed) {
-    tryTriggerWeaponOnHit(projectile, owner);
+    tryTriggerWeaponOnHit(projectile, owner, target);
   }
 
   if (projectile.effectType === "web") {
@@ -3071,6 +3112,7 @@ function applyProjectileHitToBoss(projectile, boss, owner) {
       owner.speedBuffUntil = Math.max(owner.speedBuffUntil, game.now + sand.speedEffectDuration);
     }
     spawnSandstorm(boss, sand.stormDuration);
+    tryTriggerWeaponOnHit(projectile, owner, boss);
     return;
   }
 
@@ -3081,7 +3123,7 @@ function applyProjectileHitToBoss(projectile, boss, owner) {
 
   const hit = applyDamageToBoss(boss, projectile.damage ?? 0, Math.sign(projectile.vx || 0) * 180, owner);
   if (hit) {
-    tryTriggerWeaponOnHit(projectile, owner);
+    tryTriggerWeaponOnHit(projectile, owner, boss);
   }
 }
 
@@ -3127,10 +3169,11 @@ function addPoisonStacks(target, count, duration) {
   }
 }
 
-function tryTriggerWeaponOnHit(projectile, owner) {
+function tryTriggerWeaponOnHit(projectile, owner, target = null) {
   if (!projectile || !owner || !owner.side || owner.hp <= 0) {
     return;
   }
+  tryTriggerBurningBladeWeaponBuff(owner, target);
   const healAmount = projectile.healOnHit ?? 0;
   const healCooldown = projectile.healCooldown ?? 0;
   if (healAmount <= 0 || healCooldown <= 0) {
@@ -3146,6 +3189,31 @@ function tryTriggerWeaponOnHit(projectile, owner) {
   owner.hp = nextHp;
   if (actualHeal > 0) {
     showTip(`${owner.id} 的饮血牙回复了 ${actualHeal} 点生命`);
+  }
+}
+
+function tryTriggerBurningBladeWeaponBuff(owner, target) {
+  if (!owner || owner.character?.id !== "burning-blade" || owner.characterConstellationLevel < 6) {
+    return;
+  }
+  if (game.now >= (owner.burningBladeWeaponBuffUntil ?? 0)) {
+    return;
+  }
+
+  const bonusDamage = Math.max(1, Math.round(owner.maxHp * 0.02));
+  const healAmount = Math.max(1, Math.round(owner.maxHp * 0.01));
+  if (target && target.hp > 0) {
+    if (target.id === "BOSS") {
+      applyDamageToBoss(target, bonusDamage, 0, owner);
+    } else {
+      applyHitToPlayer(target, bonusDamage, 0, 0, 1, owner);
+    }
+  }
+  const nextHp = Math.min(owner.maxHp, owner.hp + healAmount);
+  const actualHeal = nextHp - owner.hp;
+  owner.hp = nextHp;
+  if (actualHeal > 0) {
+    showTip(`${owner.id} 的燃命 6 命回复了 ${actualHeal} 点生命`);
   }
 }
 
@@ -3192,9 +3260,9 @@ function getAlliedUnits(ownerId) {
     return [];
   }
   if (game.mode === MODE.PVE) {
-    return game.players.filter((player) => player.hp > 0);
+    return game.players.filter((player) => player.hp > 0 && hasActiveCollision(player));
   }
-  return owner.hp > 0 ? [owner] : [];
+  return owner.hp > 0 && hasActiveCollision(owner) ? [owner] : [];
 }
 
 function updateHealingTotems(now) {
@@ -3343,6 +3411,14 @@ function refreshWebZoneEffects(now) {
   const activeZoneMap = new Map(activeZones.map((zone) => [zone.id, zone]));
   game.webZones = activeZones;
 
+  for (const player of game.players) {
+    if (!hasActiveCollision(player, now)) {
+      player.webZoneIds = new Set();
+      player.webSlowMultiplier = 1;
+      player.jumpLocked = false;
+    }
+  }
+
   for (const entity of getWebTrackedEntities()) {
     const previousZones = entity.webZoneIds instanceof Set ? entity.webZoneIds : new Set();
     const currentZones = new Set();
@@ -3398,7 +3474,7 @@ function getWebTrackedEntities() {
   if (game.boss) {
     entities.push(game.boss);
   }
-  return entities.filter((entity) => entity && entity.hp > 0);
+  return entities.filter((entity) => hasActiveCollision(entity));
 }
 
 function webZoneAffectsEntity(zone, entity) {
@@ -3882,10 +3958,12 @@ function applyCharacterConstellationSetup(player) {
   player.runtimeCharacterSkill = baseSkill;
   player.staticMoveMultiplier = 1;
   player.incomingDamageMultiplier = character?.incomingDamageMultiplier ?? 1;
+  player.dashDamageBase = character?.dashDamageBase ?? GAME_DATA.tuning.dashDamage;
   player.dashDamageOverride = character?.dashDamageOverride ?? null;
   player.shadowPerfectStrikeReady = false;
   player.shadowPerfectStrikeTrail = null;
   player.flamebornLeapActive = false;
+  player.burningBladeWeaponBuffUntil = 0;
   player.qinglanCooldownResetReadyAt = 0;
   player.lingmuLifeBurstReadyAt = 0;
   player.lingmuDamageHealReadyAt = 0;
@@ -3945,6 +4023,18 @@ function applyCharacterConstellationSetup(player) {
     if (level >= 4) {
       player.dashDamageOverride = 6;
     }
+  } else if (character.id === "burning-blade") {
+    const hpBonus = (level >= 1 ? 0.2 : 0) + (level >= 4 ? 0.1 : 0);
+    if (hpBonus > 0) {
+      const baseHp = character.baseHp ?? player.maxHp;
+      player.maxHp = Math.round(baseHp * (1 + hpBonus));
+    }
+    if (level >= 2) {
+      player.dashDamageBase += 2;
+    }
+    if (player.runtimeCharacterSkill && level >= 5) {
+      player.runtimeCharacterSkill.cooldown = 10;
+    }
   }
 }
 
@@ -3956,6 +4046,7 @@ function preparePlayerForBattle(player) {
   player.incomingDamageMultiplier = player.character?.incomingDamageMultiplier ?? 1;
   player.dashDamageMultiplier = player.character?.dashDamageMultiplier ?? 1;
   player.dashKnockbackMultiplier = player.character?.dashKnockbackMultiplier ?? 1;
+  player.dashDamageBase = player.character?.dashDamageBase ?? GAME_DATA.tuning.dashDamage;
   applyCharacterConstellationSetup(player);
   player.hp = player.maxHp;
   player.dashChargeMax = GAME_DATA.tuning.dashChargeMax ?? 3;
@@ -3990,6 +4081,7 @@ function preparePlayerForBattle(player) {
   player.chiyanCharge.startedAt = 0;
   player.chiyanCharge.breakAccum = 0;
   player.flamebornLeapActive = false;
+  player.burningBladeWeaponBuffUntil = 0;
   player.lingmuReviveUsed = false;
   player.lingmuDamageHealReadyAt = 0;
   player.chiyanChargeHealReadyAt = 0;
@@ -4119,6 +4211,8 @@ function resetToStart() {
   p2.dashDamageMultiplier = 1;
   p1.dashKnockbackMultiplier = 1;
   p2.dashKnockbackMultiplier = 1;
+  p1.dashDamageBase = GAME_DATA.tuning.dashDamage;
+  p2.dashDamageBase = GAME_DATA.tuning.dashDamage;
   p1.dashDamageOverride = null;
   p2.dashDamageOverride = null;
   p1.dashChargeMax = GAME_DATA.tuning.dashChargeMax ?? 3;
@@ -4163,6 +4257,8 @@ function resetToStart() {
   p2.chiyanCharge.breakAccum = 0;
   p1.flamebornLeapActive = false;
   p2.flamebornLeapActive = false;
+  p1.burningBladeWeaponBuffUntil = 0;
+  p2.burningBladeWeaponBuffUntil = 0;
   p1.lingmuReviveUsed = false;
   p2.lingmuReviveUsed = false;
   p1.lingmuRevivesRemaining = 1;
@@ -4488,7 +4584,7 @@ function drawFlamebornBlades(now) {
 }
 
 function drawPlayer(player, now) {
-  const spritePath = player.side === "p1" ? player.character.sprite.p1 : player.character.sprite.p2;
+  const spritePath = getPlayerSpritePath(player);
   const image = getImage(spritePath);
   const stunned = now < player.stunnedUntil;
   const invisible = isShadowCloakActive(player, now);
@@ -4747,6 +4843,9 @@ function drawHitboxes() {
   ctx.lineWidth = 2;
 
   for (const player of game.players) {
+    if (!hasActiveCollision(player)) {
+      continue;
+    }
     const circle = getEntityHitCircle(player);
     ctx.strokeStyle = player.side === "p1" ? "rgba(76, 201, 240, 0.95)" : "rgba(255, 117, 143, 0.95)";
     ctx.beginPath();
@@ -4812,7 +4911,7 @@ function getEntityVisualRect(entity) {
     image = getImage(entity.data.sprite);
     align = "bottom";
   } else if (entity.side) {
-    const spritePath = entity.side === "p1" ? entity.character.sprite.p1 : entity.character.sprite.p2;
+    const spritePath = getPlayerSpritePath(entity);
     image = getImage(spritePath);
     align = "bottom";
   }
@@ -4840,6 +4939,9 @@ function getContainRect(width, height, sourceWidth, sourceHeight, align = "cente
 }
 
 function entitiesOverlap(a, b) {
+  if (!hasActiveCollision(a) || !hasActiveCollision(b)) {
+    return false;
+  }
   const ca = getEntityHitCircle(a);
   const cb = getEntityHitCircle(b);
   const d = distance(ca.x, ca.y, cb.x, cb.y);
@@ -4847,6 +4949,9 @@ function entitiesOverlap(a, b) {
 }
 
 function projectileHitsEntity(projectile, entity) {
+  if (!hasActiveCollision(entity)) {
+    return false;
+  }
   const circle = getEntityHitCircle(entity);
   const d = distance(projectile.x, projectile.y, circle.x, circle.y);
   return d <= projectile.radius + circle.radius;
