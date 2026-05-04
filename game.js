@@ -2695,7 +2695,7 @@ function updateBoss(dt, now) {
 
   const bossData = boss.data;
   const bossStunned = now < (boss.stunnedUntil ?? 0);
-  const bossSpeedDebuff = now < (boss.speedDebuffUntil ?? 0)
+  const bossSpeedDebuff = now < (boss.speedDebuffUntil ?? 0) && GAME_DATA.effects.sand.speedDebuffMultiplier < 1
     ? GAME_DATA.effects.sand.speedDebuffMultiplier
     : 1;
   const bossBindMultiplier = getBindMoveMultiplier(boss, now);
@@ -3073,10 +3073,6 @@ function applyProjectileHitToPlayer(projectile, target, owner) {
   if (projectile.effectType === "sand") {
     const sand = GAME_DATA.effects.sand;
     addPoisonStacks(target, 1, sand.poisonDuration);
-    target.speedDebuffUntil = Math.max(target.speedDebuffUntil, game.now + sand.speedEffectDuration);
-    if (owner && owner.side) {
-      owner.speedBuffUntil = Math.max(owner.speedBuffUntil, game.now + sand.speedEffectDuration);
-    }
     spawnSandstorm(target, sand.stormDuration);
     tryTriggerWeaponOnHit(projectile, owner, target);
     showTip(`${target.id} 被飞沙符命中：中毒叠层`);
@@ -3107,10 +3103,6 @@ function applyProjectileHitToBoss(projectile, boss, owner) {
   if (projectile.effectType === "sand") {
     const sand = GAME_DATA.effects.sand;
     addPoisonStacks(boss, 1, sand.poisonDuration);
-    boss.speedDebuffUntil = Math.max(boss.speedDebuffUntil ?? 0, game.now + sand.speedEffectDuration);
-    if (owner && owner.side) {
-      owner.speedBuffUntil = Math.max(owner.speedBuffUntil, game.now + sand.speedEffectDuration);
-    }
     spawnSandstorm(boss, sand.stormDuration);
     tryTriggerWeaponOnHit(projectile, owner, boss);
     return;
@@ -3455,10 +3447,10 @@ function refreshWebZoneEffects(now) {
 function getEffectiveMoveSpeed(player, now) {
   let speed = GAME_DATA.tuning.moveSpeed * (player.baseMoveSpeedMultiplier ?? 1);
   speed *= player.staticMoveMultiplier ?? 1;
-  if (now < (player.speedBuffUntil ?? 0)) {
+  if (now < (player.speedBuffUntil ?? 0) && GAME_DATA.effects.sand.speedBuffMultiplier > 1) {
     speed *= GAME_DATA.effects.sand.speedBuffMultiplier;
   }
-  if (now < (player.speedDebuffUntil ?? 0)) {
+  if (now < (player.speedDebuffUntil ?? 0) && GAME_DATA.effects.sand.speedDebuffMultiplier < 1) {
     speed *= GAME_DATA.effects.sand.speedDebuffMultiplier;
   }
   if (player.character?.id === "shadow-ninja" && player.characterConstellationLevel >= 2 && isShadowCloakActive(player, now)) {
@@ -3717,10 +3709,6 @@ function collectNegativeStatuses(player, now) {
 
   if (player.jumpLocked) {
     statuses.push({ symbol: "禁", layers: 1, title: "禁跳" });
-  }
-
-  if (now < (player.speedDebuffUntil ?? 0)) {
-    statuses.push({ symbol: "迟", layers: 1, title: "减速" });
   }
 
   if (now < (player.vulnerableUntil ?? 0)) {

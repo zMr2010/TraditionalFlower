@@ -127,7 +127,7 @@
       incomingDamageMultiplier: 2,
       characterSkill: {
         type: "burning-blade",
-        cooldown: 20,
+        cooldown: 17,
         selfHpRatio: 0.5,
         leapHeightRatio: 0.5,
         bladeLengthRatio: 0.25,
@@ -288,13 +288,13 @@
       icon: "Images/Weapon/heavy.svg",
       description: "可空中释放，角色获得上跃并在原位下砸花瓣。",
       stats: {
-        冷却: "1 秒",
+        冷却: "1.5 秒",
         伤害: "5",
         控制: "眩晕 1 秒"
       },
       skill: {
         type: "heavy-drop",
-        cooldown: 1,
+        cooldown: 1.5,
         jumpBoostRatio: 0.72,
         dropSpeed: 860,
         gravity: 1800,
